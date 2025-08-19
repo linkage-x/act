@@ -8,12 +8,13 @@ import IPython
 e = IPython.embed
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats):
+    def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats, episode_len):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.dataset_dir = dataset_dir
         self.camera_names = camera_names
         self.norm_stats = norm_stats
+        self.episode_len = episode_len
         self.is_sim = None
         self.__getitem__(0) # initialize self.is_sim
 
@@ -48,10 +49,17 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
 
         self.is_sim = is_sim
-        padded_action = np.zeros(original_action_shape, dtype=np.float32)
-        padded_action[:action_len] = action
-        is_pad = np.zeros(episode_len)
-        is_pad[action_len:] = 1
+        
+        # Use a fixed episode length instead of original_action_shape to handle variable length episodes
+        # For FR3 peg-in-hole task, we'll use the episode_len from config
+        fixed_episode_len = self.episode_len  # This comes from task config
+        
+        padded_action = np.zeros((fixed_episode_len, original_action_shape[1]), dtype=np.float32)
+        actual_action_len = min(action_len, fixed_episode_len)
+        padded_action[:actual_action_len] = action[:actual_action_len]
+        
+        is_pad = np.zeros(fixed_episode_len)
+        is_pad[actual_action_len:] = 1
 
         # new axis for different cameras
         all_cam_images = []
@@ -79,26 +87,37 @@ class EpisodicDataset(torch.utils.data.Dataset):
 def get_norm_stats(dataset_dir, num_episodes):
     all_qpos_data = []
     all_action_data = []
-    for episode_idx in range(num_episodes):
-        dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
-        with h5py.File(dataset_path, 'r') as root:
-            qpos = root['/observations/qpos'][()]
-            qvel = root['/observations/qvel'][()]
-            action = root['/action'][()]
-        all_qpos_data.append(torch.from_numpy(qpos))
-        all_action_data.append(torch.from_numpy(action))
-    all_qpos_data = torch.stack(all_qpos_data)
-    all_action_data = torch.stack(all_action_data)
-    all_action_data = all_action_data
+    
+    # Get list of available episode files
+    import glob
+    episode_files = sorted(glob.glob(os.path.join(dataset_dir, 'episode_*.hdf5')))
+    
+    # Use only the first num_episodes files
+    episode_files = episode_files[:num_episodes]
+    
+    for dataset_path in episode_files:
+        try:
+            with h5py.File(dataset_path, 'r') as root:
+                qpos = root['/observations/qpos'][()]
+                qvel = root['/observations/qvel'][()]
+                action = root['/action'][()]
+            all_qpos_data.append(torch.from_numpy(qpos))
+            all_action_data.append(torch.from_numpy(action))
+        except Exception as e:
+            print(f"Skipping {dataset_path} due to error: {e}")
+            continue
+    # Concatenate all data instead of stacking (episodes have different lengths)
+    all_qpos_data = torch.cat(all_qpos_data, dim=0)
+    all_action_data = torch.cat(all_action_data, dim=0)
 
     # normalize action data
-    action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
-    action_std = all_action_data.std(dim=[0, 1], keepdim=True)
+    action_mean = all_action_data.mean(dim=0, keepdim=True)
+    action_std = all_action_data.std(dim=0, keepdim=True)
     action_std = torch.clip(action_std, 1e-2, np.inf) # clipping
 
     # normalize qpos data
-    qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
-    qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
+    qpos_mean = all_qpos_data.mean(dim=0, keepdim=True)
+    qpos_std = all_qpos_data.std(dim=0, keepdim=True)
     qpos_std = torch.clip(qpos_std, 1e-2, np.inf) # clipping
 
     stats = {"action_mean": action_mean.numpy().squeeze(), "action_std": action_std.numpy().squeeze(),
@@ -108,20 +127,47 @@ def get_norm_stats(dataset_dir, num_episodes):
     return stats
 
 
-def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val):
+def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len=None):
     print(f'\nData from: {dataset_dir}\n')
+    
+    # Get list of available episode files and extract episode IDs
+    import glob
+    episode_files = sorted(glob.glob(os.path.join(dataset_dir, 'episode_*.hdf5')))
+    available_episode_ids = []
+    
+    for file_path in episode_files:
+        try:
+            # Test if file can be opened
+            with h5py.File(file_path, 'r') as root:
+                pass
+            # Extract episode ID from filename
+            filename = os.path.basename(file_path)
+            episode_id = int(filename.replace('episode_', '').replace('.hdf5', ''))
+            available_episode_ids.append(episode_id)
+        except Exception as e:
+            print(f"Skipping {file_path} due to error: {e}")
+    
+    # Use only the first num_episodes available episodes
+    available_episode_ids = available_episode_ids[:num_episodes]
+    actual_num_episodes = len(available_episode_ids)
+    print(f"Using {actual_num_episodes} available episodes: {available_episode_ids}")
+    
     # obtain train test split
     train_ratio = 0.8
-    shuffled_indices = np.random.permutation(num_episodes)
-    train_indices = shuffled_indices[:int(train_ratio * num_episodes)]
-    val_indices = shuffled_indices[int(train_ratio * num_episodes):]
+    shuffled_indices = np.random.permutation(actual_num_episodes)
+    train_episode_ids = [available_episode_ids[i] for i in shuffled_indices[:int(train_ratio * actual_num_episodes)]]
+    val_episode_ids = [available_episode_ids[i] for i in shuffled_indices[int(train_ratio * actual_num_episodes):]]
 
     # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(dataset_dir, num_episodes)
+    norm_stats = get_norm_stats(dataset_dir, actual_num_episodes)
 
+    # If episode_len not provided, use the maximum episode length found
+    if episode_len is None:
+        episode_len = 5000  # Use the max from constants.py
+    
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats)
-    val_dataset = EpisodicDataset(val_indices, dataset_dir, camera_names, norm_stats)
+    train_dataset = EpisodicDataset(train_episode_ids, dataset_dir, camera_names, norm_stats, episode_len)
+    val_dataset = EpisodicDataset(val_episode_ids, dataset_dir, camera_names, norm_stats, episode_len)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
 

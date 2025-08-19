@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import torchvision.transforms as transforms
@@ -19,7 +20,20 @@ class ACTPolicy(nn.Module):
         env_state = None
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
-        image = normalize(image)
+        
+        # Handle image dictionary (from inference) or single tensor (from training)
+        if isinstance(image, dict):
+            # Sort cameras to ensure consistent ordering
+            camera_names = sorted(image.keys())
+            normalized_images = []
+            for cam_name in camera_names:
+                normalized_img = normalize(image[cam_name])
+                normalized_images.append(normalized_img)
+            # Stack images: (batch, num_cam, channel, height, width)
+            image = torch.stack(normalized_images, dim=1)
+        else:
+            # Single tensor case (training)
+            image = normalize(image)
         if actions is not None: # training time
             actions = actions[:, :self.model.num_queries]
             is_pad = is_pad[:, :self.model.num_queries]

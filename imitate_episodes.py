@@ -34,7 +34,7 @@ def main(args):
     num_epochs = args['num_epochs']
 
     # get task parameters
-    is_sim = task_name[:4] == 'sim_'
+    is_sim = task_name[:4] == 'sim_' or task_name.startswith('fr3_')
     if is_sim:
         from constants import SIM_TASK_CONFIGS
         task_config = SIM_TASK_CONFIGS[task_name]
@@ -46,8 +46,8 @@ def main(args):
     episode_len = task_config['episode_len']
     camera_names = task_config['camera_names']
 
-    # fixed parameters
-    state_dim = 14
+    # get state dimension from task config or default to 14
+    state_dim = task_config.get('state_dim', 14)
     lr_backbone = 1e-5
     backbone = 'resnet18'
     if policy_class == 'ACT':
@@ -65,10 +65,11 @@ def main(args):
                          'dec_layers': dec_layers,
                          'nheads': nheads,
                          'camera_names': camera_names,
+                         'state_dim': state_dim,
                          }
     elif policy_class == 'CNNMLP':
         policy_config = {'lr': args['lr'], 'lr_backbone': lr_backbone, 'backbone' : backbone, 'num_queries': 1,
-                         'camera_names': camera_names,}
+                         'camera_names': camera_names, 'state_dim': state_dim,}
     else:
         raise NotImplementedError
 
@@ -100,7 +101,7 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val)
+    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len)
 
     # save dataset stats
     if not os.path.isdir(ckpt_dir):
