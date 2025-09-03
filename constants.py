@@ -33,20 +33,20 @@ SIM_TASK_CONFIGS = {
     },
 
     'fr3_peg_in_hole': {
-        'dataset_dir': '/media/hanyu/ubuntu/act_project/peg_in_hole_hdf5_extended',
-        'num_episodes': 98,
-        'episode_len': 5000,  # Max timesteps from our data
+        'dataset_dir': '/media/hanyu/ubuntu/act_project/8_25/data_0823_converted',
+        'num_episodes': 39,
+        'episode_len': 1200,  # Max timesteps from our data
         'camera_names': ['ee_cam', 'third_person_cam'],
         'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
     },
 
-    # 'fr3_peg_in_hole_extended': {
-    #     'dataset_dir': '/media/hanyu/ubuntu/act_project/peg_in_hole_hdf5_extended',
-    #     'num_episodes': 98,  # Final: 98 successfully converted episodes
-    #     'episode_len': 8000,  # Extended for larger episodes  
-    #     'camera_names': ['ee_cam', 'third_person_cam'],
-    #     'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
-    # },
+    'fr3_pickup_kiwi': {
+        'dataset_dir': '/media/hanyu/winxdows11/Data/pick_up_kiwi_hdf5',
+        'num_episodes': 48,  # Final: 98 successfully converted episodes
+        'episode_len': 2000,  # Extended for larger episodes  
+        'camera_names': ['ee_cam', 'third_person_cam'],
+        'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
+    },
 }
 
 ### Simulation envs fixed constants

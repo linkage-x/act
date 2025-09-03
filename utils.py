@@ -16,15 +16,54 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.norm_stats = norm_stats
         self.episode_len = episode_len
         self.is_sim = None
-        self.__getitem__(0) # initialize self.is_sim
+        # Validate episodes and filter out corrupted ones
+        self.valid_episode_ids = self._validate_episodes()
+        if len(self.valid_episode_ids) > 0:
+            # Use first valid episode to initialize self.is_sim
+            first_valid_idx = self.episode_ids.index(self.valid_episode_ids[0])
+            self.__getitem_safe__(first_valid_idx)
 
+    def _validate_episodes(self):
+        """Validate episodes and return list of valid episode IDs"""
+        valid_ids = []
+        for episode_id in self.episode_ids:
+            dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
+            try:
+                with h5py.File(dataset_path, 'r') as root:
+                    # Check if required datasets exist and are readable
+                    _ = root.attrs['sim']
+                    action_shape = root['/action'].shape
+                    episode_length = action_shape[0]
+                    
+                    # Test multiple positions to ensure file integrity
+                    test_indices = [0, episode_length // 2, episode_length - 1]
+                    for idx in test_indices:
+                        if idx < episode_length:
+                            _ = root['/observations/qpos'][idx]
+                            _ = root['/observations/qvel'][idx]
+                            for cam_name in self.camera_names:
+                                _ = root[f'/observations/images/{cam_name}'][idx]
+                            _ = root['/action'][idx]
+                    valid_ids.append(episode_id)
+            except Exception as e:
+                print(f"Episode {episode_id} validation failed, excluding from dataset: {str(e)[:100]}")
+        return valid_ids
+    
+    def __getitem_safe__(self, index):
+        """Safe version of __getitem__ for initialization only"""
+        try:
+            return self.__getitem__(index)
+        except Exception as e:
+            print(f"Warning: Could not initialize with episode at index {index}: {e}")
+            return None
+    
     def __len__(self):
-        return len(self.episode_ids)
+        return len(self.valid_episode_ids)
 
     def __getitem__(self, index):
         sample_full_episode = False # hardcode
 
-        episode_id = self.episode_ids[index]
+        episode_id = self.valid_episode_ids[index]
         dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
             is_sim = root.attrs['sim']
@@ -50,16 +89,27 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         self.is_sim = is_sim
         
-        # Use a fixed episode length instead of original_action_shape to handle variable length episodes
-        # For FR3 peg-in-hole task, we'll use the episode_len from config
-        fixed_episode_len = self.episode_len  # This comes from task config
+        # Use episode_len for padding
+        target_len = self.episode_len
         
-        padded_action = np.zeros((fixed_episode_len, original_action_shape[1]), dtype=np.float32)
-        actual_action_len = min(action_len, fixed_episode_len)
-        padded_action[:actual_action_len] = action[:actual_action_len]
+        padded_action = np.zeros((target_len, original_action_shape[1]), dtype=np.float32)
+        actual_action_len = min(action_len, target_len)
         
-        is_pad = np.zeros(fixed_episode_len)
-        is_pad[actual_action_len:] = 1
+        # Fill the padded_action array with available actions
+        if actual_action_len > 0:
+            padded_action[:actual_action_len] = action[:actual_action_len]
+            
+            # If input data is insufficient, pad with the last frame data
+            if action_len < target_len and action_len > 0:
+                last_frame = action[-1]  # Get the last frame
+                # Repeat the last frame for the remaining timesteps
+                for i in range(action_len, target_len):
+                    padded_action[i] = last_frame
+        
+        # Set padding mask: 1 for padded timesteps (beyond original data), 0 for real actions
+        is_pad = np.zeros(target_len)
+        if action_len < target_len:
+            is_pad[action_len:] = 1
 
         # new axis for different cameras
         all_cam_images = []
@@ -137,9 +187,30 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
     
     for file_path in episode_files:
         try:
-            # Test if file can be opened
+            # Test if file can be opened AND data can be read at multiple points
             with h5py.File(file_path, 'r') as root:
-                pass
+                # Verify essential data structures are accessible
+                _ = root.attrs.get('sim')
+                action_shape = root['/action'].shape
+                episode_length = action_shape[0]
+                
+                # Test multiple random positions to ensure file integrity throughout
+                test_indices = [0, episode_length // 2, episode_length - 1]
+                if episode_length > 10:
+                    # Add a few more random test points for longer episodes
+                    test_indices.extend([episode_length // 4, 3 * episode_length // 4])
+                
+                for idx in test_indices:
+                    if idx < episode_length:
+                        _ = root['/observations/qpos'][idx]
+                        _ = root['/observations/qvel'][idx]
+                        # Check if camera data exists and is readable
+                        if '/observations/images' in root:
+                            cam_names = list(root['/observations/images'].keys())
+                            for cam_name in cam_names:
+                                _ = root[f'/observations/images/{cam_name}'][idx]
+                        _ = root['/action'][idx]
+                
             # Extract episode ID from filename
             filename = os.path.basename(file_path)
             episode_id = int(filename.replace('episode_', '').replace('.hdf5', ''))
@@ -151,6 +222,12 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
     available_episode_ids = available_episode_ids[:num_episodes]
     actual_num_episodes = len(available_episode_ids)
     print(f"Using {actual_num_episodes} available episodes: {available_episode_ids}")
+    
+    # Check if we have enough valid episodes
+    if actual_num_episodes == 0:
+        raise ValueError(f"No valid episodes found in {dataset_dir}. All HDF5 files appear corrupted.")
+    if actual_num_episodes < 2:
+        raise ValueError(f"Need at least 2 valid episodes for train/val split, but only found {actual_num_episodes}")
     
     # obtain train test split
     train_ratio = 0.8

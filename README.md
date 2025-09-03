@@ -1,3 +1,10 @@
+Data Prepare:
+Edit constants.py at first, then
+```
+python convert_fr3_robust.py
+```
+Train: `sh ./run_train.sh`
+
 # ACT: Action Chunking with Transformers
 
 ### *New*: [ACT tuning tips](https://docs.google.com/document/d/1FVIZfoALXg_ZkYKaYVh-qOlaXveq5CtvJHXkY25eYhs/edit?usp=sharing)
