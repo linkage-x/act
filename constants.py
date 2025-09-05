@@ -1,4 +1,5 @@
 import pathlib
+import numpy as np
 
 ### Task parameters
 DATA_DIR = '<put your data dir here>'
@@ -47,6 +48,14 @@ SIM_TASK_CONFIGS = {
         'camera_names': ['ee_cam', 'third_person_cam'],
         'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
     },
+
+    'monte01_peg_in_hole': {
+        'dataset_dir': '/boot/common_data/peg_in_hole_hdf5',
+        'num_episodes': 46,  # Updated based on converted data
+        'episode_len': 2000,  # Extended for larger episodes
+        'camera_names': ['ee_cam', 'right_ee_cam', 'third_person_cam'],  # Mapped from left->ee_cam, right->right_ee_cam
+        'state_dim': 16  # Monte01: Dual-arm 7+1 DOF each = 16 total
+    },
 }
 
 ### Simulation envs fixed constants
@@ -91,3 +100,9 @@ PUPPET_POS2JOINT = lambda x: PUPPET_GRIPPER_POSITION_NORMALIZE_FN(x) * (PUPPET_G
 PUPPET_JOINT2POS = lambda x: PUPPET_GRIPPER_POSITION_UNNORMALIZE_FN((x - PUPPET_GRIPPER_JOINT_CLOSE) / (PUPPET_GRIPPER_JOINT_OPEN - PUPPET_GRIPPER_JOINT_CLOSE))
 
 MASTER_GRIPPER_JOINT_MID = (MASTER_GRIPPER_JOINT_OPEN + MASTER_GRIPPER_JOINT_CLOSE)/2
+
+### Monte01 robot gripper constants
+MONTE01_GRIPPER_OPEN = 0.074  # meters
+MONTE01_GRIPPER_CLOSE = 0.0   # meters
+MONTE01_GRIPPER_NORMALIZE_FN = lambda x: np.clip(x / MONTE01_GRIPPER_OPEN, 0, 1)
+MONTE01_GRIPPER_UNNORMALIZE_FN = lambda x: np.clip(x * MONTE01_GRIPPER_OPEN, 0, MONTE01_GRIPPER_OPEN)

@@ -34,7 +34,7 @@ def main(args):
     num_epochs = args['num_epochs']
 
     # get task parameters
-    is_sim = task_name[:4] == 'sim_' or task_name.startswith('fr3_')
+    is_sim = task_name[:4] == 'sim_' or task_name.startswith('fr3_') or task_name.startswith('monte01_')
     if is_sim:
         from constants import SIM_TASK_CONFIGS
         task_config = SIM_TASK_CONFIGS[task_name]
