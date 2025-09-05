@@ -11,6 +11,11 @@ import time
 
 def load_and_resize_image_robust(image_path, target_size=(480, 640), fallback_color=(128, 128, 128)):
     """Load image and resize, with robust error handling"""
+    # Handle None path by returning fallback
+    if image_path is None:
+        img = np.full((target_size[0], target_size[1], 3), fallback_color, dtype=np.uint8)
+        return img
+        
     try:
         img = cv2.imread(image_path)
         if img is None:
@@ -33,28 +38,63 @@ def load_and_resize_image_robust(image_path, target_size=(480, 640), fallback_co
         img = np.full((target_size[0], target_size[1], 3), fallback_color, dtype=np.uint8)
         return img
 
-def fr3_to_act_joint_mapping(fr3_joint_pos, fr3_joint_vel, fr3_gripper_pos):
-    """Map FR3 8-DOF (7 arm + 1 gripper) directly to 8-DOF action space"""
-    fr3_arm_joints = np.array(fr3_joint_pos[:7])  # 7 DOF arm
-    fr3_arm_velocities = np.array(fr3_joint_vel[:7])
+def robot_to_act_joint_mapping(joint_pos, joint_vel, gripper_pos, is_dual_arm=False, 
+                            right_joint_pos=None, right_joint_vel=None, right_gripper_pos=None):
+    """Map robot joints to ACT action space - supports both single-arm and dual-arm
+    Single-arm (FR3): 8 DOF with gripper range 0-0.08m
+    Dual-arm (Monte01): 16 DOF with gripper range 0-0.074m
+    """
     
-    # ACT format: 8 DOF total (matching FR3)
-    act_qpos = np.zeros(8)
-    act_qvel = np.zeros(8)
-    
-    # Direct mapping: FR3 7 arm joints -> ACT 7 arm joints
-    act_qpos[0:7] = fr3_arm_joints[0:7]
-    act_qvel[0:7] = fr3_arm_velocities[0:7]
-    
-    # Gripper mapping
-    gripper_normalized = np.clip(fr3_gripper_pos, 0.0, 0.08)
-    act_qpos[7] = gripper_normalized
-    act_qvel[7] = 0.0
+    if is_dual_arm and right_joint_pos is not None:
+        # Dual-arm Monte01: 16 DOF total (7+1 left, 7+1 right)
+        act_qpos = np.zeros(16)
+        act_qvel = np.zeros(16)
+        
+        # Left arm mapping (first 8 DOF)
+        left_arm_joints = np.array(joint_pos[:7])
+        left_arm_velocities = np.array(joint_vel[:7])
+        act_qpos[0:7] = left_arm_joints[0:7]
+        act_qvel[0:7] = left_arm_velocities[0:7]
+        
+        # Left gripper (Monte01 range: 0-0.074m)
+        left_gripper_normalized = np.clip(gripper_pos, 0.0, 0.074)
+        act_qpos[7] = left_gripper_normalized
+        act_qvel[7] = 0.0
+        
+        # Right arm mapping (second 8 DOF)
+        right_arm_joints = np.array(right_joint_pos[:7])
+        right_arm_velocities = np.array(right_joint_vel[:7])
+        act_qpos[8:15] = right_arm_joints[0:7]
+        act_qvel[8:15] = right_arm_velocities[0:7]
+        
+        # Right gripper (Monte01 range: 0-0.074m)
+        right_gripper_normalized = np.clip(right_gripper_pos, 0.0, 0.074)
+        act_qpos[15] = right_gripper_normalized
+        act_qvel[15] = 0.0
+        
+    else:
+        # Single-arm FR3: 8 DOF total (7 arm + 1 gripper)
+        arm_joints = np.array(joint_pos[:7])
+        arm_velocities = np.array(joint_vel[:7])
+        
+        act_qpos = np.zeros(8)
+        act_qvel = np.zeros(8)
+        
+        # Direct mapping: 7 arm joints -> ACT 7 arm joints
+        act_qpos[0:7] = arm_joints[0:7]
+        act_qvel[0:7] = arm_velocities[0:7]
+        
+        # Gripper mapping (FR3 range: 0-0.08m)
+        gripper_normalized = np.clip(gripper_pos, 0.0, 0.08)
+        act_qpos[7] = gripper_normalized
+        act_qvel[7] = 0.0
     
     return act_qpos, act_qvel
 
-def convert_fr3_episode_robust(episode_dir, output_dir, episode_idx):
-    """Convert single FR3 episode to ACT HDF5 format with robust error handling"""
+def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
+    """Convert robot episode to ACT HDF5 format with robust error handling
+    Automatically detects single-arm (FR3) vs dual-arm (Monte01) configuration
+    """
     
     print(f"Converting episode {episode_idx:04d}...")
     
@@ -77,21 +117,63 @@ def convert_fr3_episode_robust(episode_dir, output_dir, episode_idx):
         data_points = episode_data['data']
         max_timesteps = len(data_points)
         
+        # Detect if this is dual-arm (Monte01) or single-arm (FR3) data
+        first_point = data_points[0] if data_points else {}
+        has_right_arm = 'right' in first_point.get('joint_states', {})
+        is_dual_arm = has_right_arm and 'left' in first_point.get('joint_states', {})
+        
+        if is_dual_arm:
+            print(f"  Detected dual-arm Monte01 robot configuration")
+            dof = 16  # 7+1 for each arm
+            robot_type = 'monte01'
+        else:
+            print(f"  Detected single-arm FR3 robot configuration") 
+            dof = 8  # 7+1 for single arm
+            robot_type = 'fr3'
+        
         # Pre-check for corrupt data points
         valid_indices = []
         corrupt_count = 0
         
         for i, data_point in enumerate(data_points):
             try:
-                # Check if joint states exist
-                joint_states = data_point['joint_states']['single']
+                # Check if joint states exist - handle both single and left/right robots
+                if 'single' in data_point.get('joint_states', {}):
+                    joint_states = data_point['joint_states']['single']
+                elif 'left' in data_point.get('joint_states', {}):
+                    # Use left arm for single-arm ACT format
+                    joint_states = data_point['joint_states']['left']
+                else:
+                    raise KeyError("No valid joint states found")
+                    
                 joint_pos = joint_states['position']
                 joint_vel = joint_states['velocitie']  # Note: typo in original
-                gripper_pos = data_point['tools']['single']['position']
                 
-                # Check if image paths exist
-                ee_cam_path = os.path.join(episode_dir, data_point['colors']['ee_cam_color'])
-                third_person_path = os.path.join(episode_dir, data_point['colors']['third_person_cam_color'])
+                # Handle gripper position
+                if 'tools' in data_point and 'single' in data_point['tools']:
+                    gripper_pos = data_point['tools']['single']['position']
+                elif 'tools' in data_point and 'left' in data_point['tools']:
+                    gripper_pos = data_point['tools']['left']['position']
+                else:
+                    # Default gripper position if not found
+                    gripper_pos = 0.04
+                
+                # Check if image paths exist - handle both left/right and single ee_cam
+                colors = data_point.get('colors', {})
+                
+                # Try different camera naming conventions
+                if 'left_ee_cam_color' in colors:
+                    # Use left camera as primary ee_cam
+                    ee_cam_path = os.path.join(episode_dir, colors['left_ee_cam_color'])
+                elif 'ee_cam_color' in colors:
+                    ee_cam_path = os.path.join(episode_dir, colors['ee_cam_color'])
+                else:
+                    ee_cam_path = None
+                    
+                if 'third_person_cam_color' in colors:
+                    third_person_path = os.path.join(episode_dir, colors['third_person_cam_color'])
+                else:
+                    third_person_path = None
                 
                 if len(joint_pos) >= 7 and len(joint_vel) >= 7:
                     valid_indices.append(i)
@@ -118,6 +200,10 @@ def convert_fr3_episode_robust(episode_dir, output_dir, episode_idx):
             '/observations/images/third_person_cam': []
         }
         
+        # Add right camera for dual-arm
+        if is_dual_arm:
+            data_dict['/observations/images/right_ee_cam'] = []
+        
         print(f"  Processing {len(valid_indices)} valid timesteps...")
         
         successful_frames = 0
@@ -128,25 +214,99 @@ def convert_fr3_episode_robust(episode_dir, output_dir, episode_idx):
             try:
                 data_point = data_points[i]
                 
-                # Extract joint states
-                joint_states = data_point['joint_states']['single']
+                # Extract joint states - handle both single and left/right robots
+                if 'single' in data_point.get('joint_states', {}):
+                    joint_states = data_point['joint_states']['single']
+                elif 'left' in data_point.get('joint_states', {}):
+                    # Use left arm for single-arm ACT format
+                    joint_states = data_point['joint_states']['left']
+                else:
+                    raise KeyError("No valid joint states found")
+                    
                 joint_pos = joint_states['position']
                 joint_vel = joint_states['velocitie']
-                gripper_pos = data_point['tools']['single']['position']
+                
+                # Handle gripper position
+                if 'tools' in data_point and 'single' in data_point['tools']:
+                    gripper_pos = data_point['tools']['single']['position']
+                elif 'tools' in data_point and 'left' in data_point['tools']:
+                    gripper_pos = data_point['tools']['left']['position']
+                else:
+                    # Default gripper position if not found
+                    gripper_pos = 0.04
+                
+                # Handle dual-arm data if present
+                right_joint_pos = None
+                right_joint_vel = None
+                right_gripper_pos = None
+                
+                if is_dual_arm:
+                    # Extract right arm data
+                    if 'right' in data_point.get('joint_states', {}):
+                        right_joint_states = data_point['joint_states']['right']
+                        right_joint_pos = right_joint_states['position']
+                        right_joint_vel = right_joint_states['velocitie']
+                    
+                    # Handle right gripper
+                    if 'tools' in data_point and 'right' in data_point['tools']:
+                        right_gripper_pos = data_point['tools']['right']['position']
+                    else:
+                        right_gripper_pos = 0.037  # Default to mid position for Monte01
                 
                 # Map to ACT format
-                act_qpos, act_qvel = fr3_to_act_joint_mapping(joint_pos, joint_vel, gripper_pos)
+                act_qpos, act_qvel = robot_to_act_joint_mapping(
+                    joint_pos, joint_vel, gripper_pos,
+                    is_dual_arm=is_dual_arm,
+                    right_joint_pos=right_joint_pos,
+                    right_joint_vel=right_joint_vel,
+                    right_gripper_pos=right_gripper_pos
+                )
                 
                 # For actions, use next valid frame if available
                 if idx_i < len(valid_indices) - 1:
                     next_i = valid_indices[idx_i + 1]
                     next_data_point = data_points[next_i]
-                    next_joint_states = next_data_point['joint_states']['single']
-                    next_gripper_pos = next_data_point['tools']['single']['position']
-                    action, _ = fr3_to_act_joint_mapping(
+                    
+                    # Handle joint states for next frame
+                    if 'single' in next_data_point.get('joint_states', {}):
+                        next_joint_states = next_data_point['joint_states']['single']
+                    elif 'left' in next_data_point.get('joint_states', {}):
+                        next_joint_states = next_data_point['joint_states']['left']
+                    else:
+                        next_joint_states = joint_states  # Fallback to current
+                    
+                    # Handle gripper for next frame
+                    if 'tools' in next_data_point and 'single' in next_data_point['tools']:
+                        next_gripper_pos = next_data_point['tools']['single']['position']
+                    elif 'tools' in next_data_point and 'left' in next_data_point['tools']:
+                        next_gripper_pos = next_data_point['tools']['left']['position']
+                    else:
+                        next_gripper_pos = gripper_pos  # Fallback to current
+                        
+                    # Handle dual-arm for next frame if needed
+                    next_right_joint_pos = None
+                    next_right_joint_vel = None
+                    next_right_gripper_pos = None
+                    
+                    if is_dual_arm:
+                        if 'right' in next_data_point.get('joint_states', {}):
+                            next_right_joint_states = next_data_point['joint_states']['right']
+                            next_right_joint_pos = next_right_joint_states['position']
+                            next_right_joint_vel = next_right_joint_states['velocitie']
+                        
+                        if 'tools' in next_data_point and 'right' in next_data_point['tools']:
+                            next_right_gripper_pos = next_data_point['tools']['right']['position']
+                        else:
+                            next_right_gripper_pos = right_gripper_pos if right_gripper_pos else 0.037
+                    
+                    action, _ = robot_to_act_joint_mapping(
                         next_joint_states['position'], 
                         next_joint_states['velocitie'], 
-                        next_gripper_pos
+                        next_gripper_pos,
+                        is_dual_arm=is_dual_arm,
+                        right_joint_pos=next_right_joint_pos,
+                        right_joint_vel=next_right_joint_vel,
+                        right_gripper_pos=next_right_gripper_pos
                     )
                 else:
                     action = act_qpos.copy()
@@ -156,15 +316,37 @@ def convert_fr3_episode_robust(episode_dir, output_dir, episode_idx):
                 data_dict['/observations/qvel'].append(act_qvel)
                 data_dict['/action'].append(action)
                 
-                # Load images with robust handling
-                ee_cam_path = os.path.join(episode_dir, data_point['colors']['ee_cam_color'])
-                third_person_path = os.path.join(episode_dir, data_point['colors']['third_person_cam_color'])
+                # Load images with robust handling - support different camera naming
+                colors = data_point.get('colors', {})
+                
+                # Handle different camera naming conventions
+                if 'left_ee_cam_color' in colors:
+                    ee_cam_path = os.path.join(episode_dir, colors['left_ee_cam_color'])
+                elif 'ee_cam_color' in colors:
+                    ee_cam_path = os.path.join(episode_dir, colors['ee_cam_color'])
+                else:
+                    # Use a gray fallback if no ee_cam found
+                    ee_cam_path = None
+                    
+                if 'third_person_cam_color' in colors:
+                    third_person_path = os.path.join(episode_dir, colors['third_person_cam_color'])
+                else:
+                    third_person_path = None
                 
                 ee_img = load_and_resize_image_robust(ee_cam_path)
                 third_person_img = load_and_resize_image_robust(third_person_path)
                 
                 data_dict['/observations/images/ee_cam'].append(ee_img)
                 data_dict['/observations/images/third_person_cam'].append(third_person_img)
+                
+                # Handle right camera for dual-arm
+                if is_dual_arm:
+                    if 'right_ee_cam_color' in colors:
+                        right_ee_cam_path = os.path.join(episode_dir, colors['right_ee_cam_color'])
+                    else:
+                        right_ee_cam_path = None
+                    right_ee_img = load_and_resize_image_robust(right_ee_cam_path)
+                    data_dict['/observations/images/right_ee_cam'].append(right_ee_img)
                 
                 successful_frames += 1
                 
@@ -190,8 +372,8 @@ def convert_fr3_episode_robust(episode_dir, output_dir, episode_idx):
                 # Set attributes
                 root.attrs['sim'] = False
                 root.attrs['task'] = 'peg_in_hole'
-                root.attrs['robot'] = 'fr3'
-                root.attrs['dof'] = 8
+                root.attrs['robot'] = robot_type
+                root.attrs['dof'] = dof
                 root.attrs['episode_idx'] = episode_idx
                 root.attrs['timesteps'] = successful_frames
                 root.attrs['original_timesteps'] = max_timesteps
@@ -207,10 +389,15 @@ def convert_fr3_episode_robust(episode_dir, output_dir, episode_idx):
                 third_person_data = image.create_dataset('third_person_cam', (successful_frames, 480, 640, 3),
                                                         dtype='uint8', chunks=(1, 480, 640, 3))
                 
-                # Create joint datasets
-                qpos = obs.create_dataset('qpos', (successful_frames, 8))
-                qvel = obs.create_dataset('qvel', (successful_frames, 8))
-                action = root.create_dataset('action', (successful_frames, 8))
+                # Add right camera dataset for dual-arm
+                if is_dual_arm:
+                    right_ee_cam_data = image.create_dataset('right_ee_cam', (successful_frames, 480, 640, 3),
+                                                            dtype='uint8', chunks=(1, 480, 640, 3))
+                
+                # Create joint datasets with appropriate DOF
+                qpos = obs.create_dataset('qpos', (successful_frames, dof))
+                qvel = obs.create_dataset('qvel', (successful_frames, dof))
+                action = root.create_dataset('action', (successful_frames, dof))
                 
                 # Fill datasets
                 for name, array in data_dict.items():
@@ -230,7 +417,7 @@ def convert_fr3_episode_robust(episode_dir, output_dir, episode_idx):
         return None
 
 def main():
-    parser = argparse.ArgumentParser(description='Robustly convert FR3 data to ACT HDF5 format')
+    parser = argparse.ArgumentParser(description='Robustly convert FR3/Monte01 robot data to ACT HDF5 format')
     parser.add_argument('--input_dir', type=str, required=True)
     parser.add_argument('--output_dir', type=str, required=True)
     parser.add_argument('--episodes', type=str, default='all')
@@ -265,7 +452,7 @@ def main():
         episodes_to_convert = [d for d in episodes_to_convert 
                              if not (output_dir / f'episode_{int(d.name.split("_")[1])}.hdf5').exists()]
     
-    print(f"=== Robust FR3 to ACT Conversion ===")
+    print(f"=== Robust Robot (FR3/Monte01) to ACT Conversion ===")
     print(f"Complete episodes: {len(complete_episodes)}")
     print(f"Episodes to convert: {len(episodes_to_convert)}")
     print(f"Features: Robust image loading, corrupt frame handling")
@@ -289,7 +476,7 @@ def main():
         print(f"\n[{i}/{len(episodes_to_convert)}] Episode {episode_num:04d}:")
         
         try:
-            output_path = convert_fr3_episode_robust(episode_dir, output_dir, episode_num)
+            output_path = convert_robot_episode_robust(episode_dir, output_dir, episode_num)
             if output_path:
                 success_count += 1
                 
