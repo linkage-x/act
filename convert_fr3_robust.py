@@ -136,54 +136,63 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
         corrupt_count = 0
         
         for i, data_point in enumerate(data_points):
-            try:
-                # Check if joint states exist - handle both single and left/right robots
-                if 'single' in data_point.get('joint_states', {}):
-                    joint_states = data_point['joint_states']['single']
-                elif 'left' in data_point.get('joint_states', {}):
-                    # Use left arm for single-arm ACT format
-                    joint_states = data_point['joint_states']['left']
-                else:
-                    raise KeyError("No valid joint states found")
-                    
-                joint_pos = joint_states['position']
-                joint_vel = joint_states['velocitie']  # Note: typo in original
+            # Check if joint states exist - handle both single and left/right robots
+            if 'single' in data_point.get('joint_states', {}):
+                joint_states = data_point['joint_states']['single']
+            elif 'left' in data_point.get('joint_states', {}):
+                # Use left arm for single-arm ACT format
+                joint_states = data_point['joint_states']['left']
+            else:
+                raise KeyError("No valid joint states found")
                 
-                # Handle gripper position
-                if 'tools' in data_point and 'single' in data_point['tools']:
-                    gripper_pos = data_point['tools']['single']['position']
-                elif 'tools' in data_point and 'left' in data_point['tools']:
-                    gripper_pos = data_point['tools']['left']['position']
+            joint_pos = joint_states['position']
+            
+            # Handle gripper position
+            if 'tools' in data_point and 'single' in data_point['tools']:
+                gripper_pos = data_point['tools']['single']['position']
+            elif 'tools' in data_point and 'left' in data_point['tools']:
+                gripper_pos = data_point['tools']['left']['position']
+            else:
+                # Default gripper position if not found
+                gripper_pos = 0.04
+            
+            # Check if image paths exist - handle both left/right and single ee_cam
+            colors = data_point.get('colors', {})
+            
+            # Try different camera naming conventions
+            if 'left_ee_cam_color' in colors:
+                # Use left camera as primary ee_cam
+                color_data = colors['left_ee_cam_color']
+                if isinstance(color_data, dict):
+                    color_path = color_data.get('path', '')
                 else:
-                    # Default gripper position if not found
-                    gripper_pos = 0.04
+                    color_path = color_data
+                ee_cam_path = os.path.join(episode_dir, color_path) if color_path else None
+            elif 'ee_cam_color' in colors:
+                color_data = colors['ee_cam_color']
+                if isinstance(color_data, dict):
+                    color_path = color_data.get('path', '')
+                else:
+                    color_path = color_data
+                ee_cam_path = os.path.join(episode_dir, color_path) if color_path else None
+            else:
+                ee_cam_path = None
                 
-                # Check if image paths exist - handle both left/right and single ee_cam
-                colors = data_point.get('colors', {})
-                
-                # Try different camera naming conventions
-                if 'left_ee_cam_color' in colors:
-                    # Use left camera as primary ee_cam
-                    ee_cam_path = os.path.join(episode_dir, colors['left_ee_cam_color'])
-                elif 'ee_cam_color' in colors:
-                    ee_cam_path = os.path.join(episode_dir, colors['ee_cam_color'])
+            if 'third_person_cam_color' in colors:
+                color_data = colors['third_person_cam_color']
+                if isinstance(color_data, dict):
+                    color_path = color_data.get('path', '')
                 else:
-                    ee_cam_path = None
-                    
-                if 'third_person_cam_color' in colors:
-                    third_person_path = os.path.join(episode_dir, colors['third_person_cam_color'])
-                else:
-                    third_person_path = None
-                
-                if len(joint_pos) >= 7 and len(joint_vel) >= 7:
-                    valid_indices.append(i)
-                else:
-                    corrupt_count += 1
-                    
-            except (KeyError, IndexError, TypeError) as e:
+                    color_path = color_data
+                third_person_path = os.path.join(episode_dir, color_path) if color_path else None
+            else:
+                third_person_path = None
+            
+            if len(joint_pos) >= 7:
+                valid_indices.append(i)
+            else:
                 corrupt_count += 1
-                continue
-        
+                    
         if len(valid_indices) < 10:  # Need at least 10 valid frames
             print(f"  ❌ Episode {episode_idx} has too few valid frames ({len(valid_indices)})")
             return None
@@ -224,7 +233,7 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                     raise KeyError("No valid joint states found")
                     
                 joint_pos = joint_states['position']
-                joint_vel = joint_states['velocitie']
+                joint_vel = joint_states['velocity']
                 
                 # Handle gripper position
                 if 'tools' in data_point and 'single' in data_point['tools']:
@@ -245,7 +254,7 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                     if 'right' in data_point.get('joint_states', {}):
                         right_joint_states = data_point['joint_states']['right']
                         right_joint_pos = right_joint_states['position']
-                        right_joint_vel = right_joint_states['velocitie']
+                        right_joint_vel = right_joint_states['velocity']
                     
                     # Handle right gripper
                     if 'tools' in data_point and 'right' in data_point['tools']:
@@ -292,7 +301,7 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                         if 'right' in next_data_point.get('joint_states', {}):
                             next_right_joint_states = next_data_point['joint_states']['right']
                             next_right_joint_pos = next_right_joint_states['position']
-                            next_right_joint_vel = next_right_joint_states['velocitie']
+                            next_right_joint_vel = next_right_joint_states['velocity']
                         
                         if 'tools' in next_data_point and 'right' in next_data_point['tools']:
                             next_right_gripper_pos = next_data_point['tools']['right']['position']
@@ -301,7 +310,7 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                     
                     action, _ = robot_to_act_joint_mapping(
                         next_joint_states['position'], 
-                        next_joint_states['velocitie'], 
+                        next_joint_states['velocity'], 
                         next_gripper_pos,
                         is_dual_arm=is_dual_arm,
                         right_joint_pos=next_right_joint_pos,
@@ -321,15 +330,30 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                 
                 # Handle different camera naming conventions
                 if 'left_ee_cam_color' in colors:
-                    ee_cam_path = os.path.join(episode_dir, colors['left_ee_cam_color'])
+                    color_data = colors['left_ee_cam_color']
+                    if isinstance(color_data, dict):
+                        color_path = color_data.get('path', '')
+                    else:
+                        color_path = color_data
+                    ee_cam_path = os.path.join(episode_dir, color_path) if color_path else None
                 elif 'ee_cam_color' in colors:
-                    ee_cam_path = os.path.join(episode_dir, colors['ee_cam_color'])
+                    color_data = colors['ee_cam_color']
+                    if isinstance(color_data, dict):
+                        color_path = color_data.get('path', '')
+                    else:
+                        color_path = color_data
+                    ee_cam_path = os.path.join(episode_dir, color_path) if color_path else None
                 else:
                     # Use a gray fallback if no ee_cam found
                     ee_cam_path = None
                     
                 if 'third_person_cam_color' in colors:
-                    third_person_path = os.path.join(episode_dir, colors['third_person_cam_color'])
+                    color_data = colors['third_person_cam_color']
+                    if isinstance(color_data, dict):
+                        color_path = color_data.get('path', '')
+                    else:
+                        color_path = color_data
+                    third_person_path = os.path.join(episode_dir, color_path) if color_path else None
                 else:
                     third_person_path = None
                 
@@ -342,7 +366,12 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                 # Handle right camera for dual-arm
                 if is_dual_arm:
                     if 'right_ee_cam_color' in colors:
-                        right_ee_cam_path = os.path.join(episode_dir, colors['right_ee_cam_color'])
+                        color_data = colors['right_ee_cam_color']
+                        if isinstance(color_data, dict):
+                            color_path = color_data.get('path', '')
+                        else:
+                            color_path = color_data
+                        right_ee_cam_path = os.path.join(episode_dir, color_path) if color_path else None
                     else:
                         right_ee_cam_path = None
                     right_ee_img = load_and_resize_image_robust(right_ee_cam_path)
@@ -518,3 +547,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
