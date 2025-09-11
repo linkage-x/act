@@ -48,7 +48,6 @@ SIM_TASK_CONFIGS = {
         'camera_names': ['ee_cam', 'third_person_cam'],
         'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
     },
-
     'monte01_peg_in_hole': {
         'dataset_dir': '/boot/common_data/peg_in_hole_hdf5',
         'num_episodes': 46,  # Updated based on converted data
