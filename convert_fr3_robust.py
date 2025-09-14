@@ -187,6 +187,16 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                 third_person_path = os.path.join(episode_dir, color_path) if color_path else None
             else:
                 third_person_path = None
+                
+            if 'side_cam_color' in colors:
+                color_data = colors['side_cam_color']
+                if isinstance(color_data, dict):
+                    color_path = color_data.get('path', '')
+                else:
+                    color_path = color_data
+                side_cam_path = os.path.join(episode_dir, color_path) if color_path else None
+            else:
+                side_cam_path = None
             
             if len(joint_pos) >= 7:
                 valid_indices.append(i)
@@ -206,7 +216,8 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
             '/observations/qvel': [],
             '/action': [],
             '/observations/images/ee_cam': [],
-            '/observations/images/third_person_cam': []
+            '/observations/images/third_person_cam': [],
+            '/observations/images/side_cam': []
         }
         
         # Add right camera for dual-arm
@@ -356,12 +367,24 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                     third_person_path = os.path.join(episode_dir, color_path) if color_path else None
                 else:
                     third_person_path = None
+                    
+                if 'side_cam_color' in colors:
+                    color_data = colors['side_cam_color']
+                    if isinstance(color_data, dict):
+                        color_path = color_data.get('path', '')
+                    else:
+                        color_path = color_data
+                    side_cam_path = os.path.join(episode_dir, color_path) if color_path else None
+                else:
+                    side_cam_path = None
                 
                 ee_img = load_and_resize_image_robust(ee_cam_path)
                 third_person_img = load_and_resize_image_robust(third_person_path)
+                side_cam_img = load_and_resize_image_robust(side_cam_path)
                 
                 data_dict['/observations/images/ee_cam'].append(ee_img)
                 data_dict['/observations/images/third_person_cam'].append(third_person_img)
+                data_dict['/observations/images/side_cam'].append(side_cam_img)
                 
                 # Handle right camera for dual-arm
                 if is_dual_arm:
@@ -417,6 +440,8 @@ def convert_robot_episode_robust(episode_dir, output_dir, episode_idx):
                                                   dtype='uint8', chunks=(1, 480, 640, 3))
                 third_person_data = image.create_dataset('third_person_cam', (successful_frames, 480, 640, 3),
                                                         dtype='uint8', chunks=(1, 480, 640, 3))
+                side_cam_data = image.create_dataset('side_cam', (successful_frames, 480, 640, 3),
+                                                    dtype='uint8', chunks=(1, 480, 640, 3))
                 
                 # Add right camera dataset for dual-arm
                 if is_dual_arm:
