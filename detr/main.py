@@ -69,10 +69,25 @@ def get_args_parser():
 
 def build_ACT_model_and_optimizer(args_override):
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
-    args = parser.parse_args()
 
+    # Provide defaults for required arguments to avoid parse errors
+    default_args = [
+        '--ckpt_dir', '',
+        '--policy_class', 'ACT',
+        '--task_name', 'default_task',
+        '--seed', '0',
+        '--num_epochs', '1000'
+    ]
+
+    args = parser.parse_args(default_args)
+
+    # Apply all overrides
     for k, v in args_override.items():
         setattr(args, k, v)
+
+    # Ensure state_dim is set - map from action_dim if needed
+    if hasattr(args, 'action_dim') and not hasattr(args, 'state_dim'):
+        args.state_dim = args.action_dim
 
     model = build_ACT_model(args)
     model.cuda()
@@ -92,10 +107,25 @@ def build_ACT_model_and_optimizer(args_override):
 
 def build_CNNMLP_model_and_optimizer(args_override):
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
-    args = parser.parse_args()
 
+    # Provide defaults for required arguments to avoid parse errors
+    default_args = [
+        '--ckpt_dir', '',
+        '--policy_class', 'CNNMLP',
+        '--task_name', 'default_task',
+        '--seed', '0',
+        '--num_epochs', '1000'
+    ]
+
+    args = parser.parse_args(default_args)
+
+    # Apply all overrides
     for k, v in args_override.items():
         setattr(args, k, v)
+
+    # Ensure state_dim is set - map from action_dim if needed
+    if hasattr(args, 'action_dim') and not hasattr(args, 'state_dim'):
+        args.state_dim = args.action_dim
 
     model = build_CNNMLP_model(args)
     model.cuda()

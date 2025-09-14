@@ -1,6 +1,7 @@
 import torch
 import numpy as np
-import os
+import os,sys
+sys.path.insert(0, os.path.dirname(__file__))
 import pickle
 import argparse
 import matplotlib.pyplot as plt
@@ -17,7 +18,6 @@ from policy import ACTPolicy, CNNMLPPolicy
 from visualize_episodes import save_videos
 
 from sim_env import BOX_POSE
-
 import IPython
 e = IPython.embed
 
@@ -42,7 +42,7 @@ def main(args):
         from aloha_scripts.constants import TASK_CONFIGS
         task_config = TASK_CONFIGS[task_name]
     dataset_dir = task_config['dataset_dir']
-    num_episodes = task_config['num_episodes']
+    num_episodes = task_config.get('num_episodes', None)  # Optional, auto-detect if not specified
     episode_len = task_config['episode_len']
     camera_names = task_config['camera_names']
 

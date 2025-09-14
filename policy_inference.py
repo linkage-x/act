@@ -128,31 +128,31 @@ class ACTInference(PolicyInference):
             camera_names: 相机名称列表
             **kwargs: 其他ACT参数
         """
-        # ACT策略配置
+        # ACT策略配置 - 确保数值参数为正确类型
         policy_config = {
-            'lr': kwargs.get('lr', 1e-5),
-            'num_queries': kwargs.get('num_queries', 100),  # chunk_size
-            'kl_weight': kwargs.get('kl_weight', 10),
-            'hidden_dim': kwargs.get('hidden_dim', 512),
-            'dim_feedforward': kwargs.get('dim_feedforward', 3200),
-            'lr_backbone': kwargs.get('lr_backbone', 1e-5),
-            'backbone': kwargs.get('backbone', 'resnet18'),
-            'enc_layers': kwargs.get('enc_layers', 4),
-            'dec_layers': kwargs.get('dec_layers', 7),
-            'nheads': kwargs.get('nheads', 8),
+            'lr': float(kwargs.get('lr', 1e-5)),  # 确保 lr 为浮点数
+            'num_queries': int(kwargs.get('num_queries', 100)),  # chunk_size
+            'kl_weight': int(kwargs.get('kl_weight', 10)),
+            'hidden_dim': int(kwargs.get('hidden_dim', 512)),
+            'dim_feedforward': int(kwargs.get('dim_feedforward', 3200)),
+            'lr_backbone': float(kwargs.get('lr_backbone', 1e-5)),  # 确保 lr_backbone 为浮点数
+            'backbone': str(kwargs.get('backbone', 'resnet18')),
+            'enc_layers': int(kwargs.get('enc_layers', 4)),
+            'dec_layers': int(kwargs.get('dec_layers', 7)),
+            'nheads': int(kwargs.get('nheads', 8)),
             'camera_names': camera_names,
-            'vq': kwargs.get('vq', False),
+            'vq': bool(kwargs.get('vq', False)),
             'vq_class': kwargs.get('vq_class', None),
-            'vq_dim': kwargs.get('vq_dim', None),
-            'action_dim': state_dim,
-            'no_encoder': kwargs.get('no_encoder', False),
+            'vq_dim': kwargs.get('vq_dim', None) if kwargs.get('vq_dim') is None else int(kwargs.get('vq_dim')),
+            'action_dim': int(state_dim),
+            'no_encoder': bool(kwargs.get('no_encoder', False)),
         }
         
         super().__init__(ckpt_dir, policy_config)
         
     def init_policy(self):
         """初始化ACT策略"""
-        from policy import ACTPolicy
+        from .policy import ACTPolicy
         
         self.policy = ACTPolicy(self.policy_config)
         self.policy.to(self.device)

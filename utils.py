@@ -8,10 +8,10 @@ import IPython
 e = IPython.embed
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, dataset_dir, camera_names, norm_stats, episode_len):
+    def __init__(self, episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
-        self.dataset_dir = dataset_dir
+        self.episode_id_to_dir = episode_id_to_dir
         self.camera_names = camera_names
         self.norm_stats = norm_stats
         self.episode_len = episode_len
@@ -27,7 +27,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         """Validate episodes and return list of valid episode IDs"""
         valid_ids = []
         for episode_id in self.episode_ids:
-            dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
+            dir_path, local_episode_id = self.episode_id_to_dir[episode_id]
+            dataset_path = os.path.join(dir_path, f'episode_{local_episode_id}.hdf5')
             try:
                 with h5py.File(dataset_path, 'r') as root:
                     # Check if required datasets exist and are readable
@@ -64,7 +65,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         sample_full_episode = False # hardcode
 
         episode_id = self.valid_episode_ids[index]
-        dataset_path = os.path.join(self.dataset_dir, f'episode_{episode_id}.hdf5')
+        dir_path, local_episode_id = self.episode_id_to_dir[episode_id]
+        dataset_path = os.path.join(dir_path, f'episode_{local_episode_id}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
             is_sim = root.attrs['sim']
             original_action_shape = root['/action'].shape
@@ -134,18 +136,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
         return image_data, qpos_data, action_data, is_pad
 
 
-def get_norm_stats(dataset_dir, num_episodes):
+def get_norm_stats(dataset_dirs, episode_id_to_dir, episode_ids):
     all_qpos_data = []
     all_action_data = []
-    
-    # Get list of available episode files
-    import glob
-    episode_files = sorted(glob.glob(os.path.join(dataset_dir, 'episode_*.hdf5')))
-    
-    # Use only the first num_episodes files
-    episode_files = episode_files[:num_episodes]
-    
-    for dataset_path in episode_files:
+
+    for episode_id in episode_ids:
+        dir_path, local_episode_id = episode_id_to_dir[episode_id]
+        dataset_path = os.path.join(dir_path, f'episode_{local_episode_id}.hdf5')
         try:
             with h5py.File(dataset_path, 'r') as root:
                 qpos = root['/observations/qpos'][()]
@@ -178,14 +175,33 @@ def get_norm_stats(dataset_dir, num_episodes):
 
 
 def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len=None):
-    print(f'\nData from: {dataset_dir}\n')
-    
-    # Get list of available episode files and extract episode IDs
+    # Support both single directory (string) and multiple directories (list)
+    if isinstance(dataset_dir, str):
+        dataset_dirs = [dataset_dir]
+    else:
+        dataset_dirs = dataset_dir
+
+    print(f'\nData from: {dataset_dirs}\n')
+
+    # Get list of available episode files and extract episode IDs from all directories
     import glob
-    episode_files = sorted(glob.glob(os.path.join(dataset_dir, 'episode_*.hdf5')))
+    episode_files = []
+    episode_id_to_dir = {}  # Map episode_id to (directory, local_episode_id)
+
+    for dir_path in dataset_dirs:
+        dir_episode_files = sorted(glob.glob(os.path.join(dir_path, 'episode_*.hdf5')))
+        for file_path in dir_episode_files:
+            filename = os.path.basename(file_path)
+            local_episode_id = int(filename.replace('episode_', '').replace('.hdf5', ''))
+
+            # Create global unique episode ID by combining dir index and local ID
+            global_episode_id = len(episode_files)
+            episode_files.append(file_path)
+            episode_id_to_dir[global_episode_id] = (dir_path, local_episode_id)
+
     available_episode_ids = []
-    
-    for file_path in episode_files:
+
+    for episode_idx, file_path in enumerate(episode_files):
         try:
             # Test if file can be opened AND data can be read at multiple points
             with h5py.File(file_path, 'r') as root:
@@ -193,13 +209,13 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
                 _ = root.attrs.get('sim')
                 action_shape = root['/action'].shape
                 episode_length = action_shape[0]
-                
+
                 # Test multiple random positions to ensure file integrity throughout
                 test_indices = [0, episode_length // 2, episode_length - 1]
                 if episode_length > 10:
                     # Add a few more random test points for longer episodes
                     test_indices.extend([episode_length // 4, 3 * episode_length // 4])
-                
+
                 for idx in test_indices:
                     if idx < episode_length:
                         _ = root['/observations/qpos'][idx]
@@ -210,22 +226,25 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
                             for cam_name in cam_names:
                                 _ = root[f'/observations/images/{cam_name}'][idx]
                         _ = root['/action'][idx]
-                
-            # Extract episode ID from filename
-            filename = os.path.basename(file_path)
-            episode_id = int(filename.replace('episode_', '').replace('.hdf5', ''))
-            available_episode_ids.append(episode_id)
+
+            # Use global episode ID (index in episode_files list)
+            available_episode_ids.append(episode_idx)
         except Exception as e:
             print(f"Skipping {file_path} due to error: {e}")
     
-    # Use only the first num_episodes available episodes
-    available_episode_ids = available_episode_ids[:num_episodes]
+    # Use all available episodes, ignore the num_episodes parameter for auto-calculation
     actual_num_episodes = len(available_episode_ids)
-    print(f"Using {actual_num_episodes} available episodes: {available_episode_ids}")
+    print(f"Auto-detected {actual_num_episodes} available episodes from {len(dataset_dirs)} directories: {available_episode_ids}")
+
+    # If num_episodes is specified and less than available episodes, use only that many
+    if num_episodes is not None and num_episodes < actual_num_episodes:
+        available_episode_ids = available_episode_ids[:num_episodes]
+        actual_num_episodes = len(available_episode_ids)
+        print(f"Limited to first {actual_num_episodes} episodes as requested")
     
     # Check if we have enough valid episodes
     if actual_num_episodes == 0:
-        raise ValueError(f"No valid episodes found in {dataset_dir}. All HDF5 files appear corrupted.")
+        raise ValueError(f"No valid episodes found in {dataset_dirs}. All HDF5 files appear corrupted.")
     if actual_num_episodes < 2:
         raise ValueError(f"Need at least 2 valid episodes for train/val split, but only found {actual_num_episodes}")
     
@@ -236,15 +255,15 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
     val_episode_ids = [available_episode_ids[i] for i in shuffled_indices[int(train_ratio * actual_num_episodes):]]
 
     # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(dataset_dir, actual_num_episodes)
+    norm_stats = get_norm_stats(dataset_dirs, episode_id_to_dir, available_episode_ids)
 
     # If episode_len not provided, use the maximum episode length found
     if episode_len is None:
         episode_len = 5000  # Use the max from constants.py
-    
+
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_episode_ids, dataset_dir, camera_names, norm_stats, episode_len)
-    val_dataset = EpisodicDataset(val_episode_ids, dataset_dir, camera_names, norm_stats, episode_len)
+    train_dataset = EpisodicDataset(train_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len)
+    val_dataset = EpisodicDataset(val_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
 

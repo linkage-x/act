@@ -55,6 +55,40 @@ SIM_TASK_CONFIGS = {
         'camera_names': ['ee_cam', 'right_ee_cam', 'third_person_cam'],  # Mapped from left->ee_cam, right->right_ee_cam
         'state_dim': 16  # Monte01: Dual-arm 7+1 DOF each = 16 total
     },
+    'fr3_peg_in_hole_0914_50ep': {
+        'dataset_dir': '/boot/common_data/fr3_peg_in_hole_0914_50ep_hdf5',
+        'num_episodes': 50,  # Updated based on converted data
+        'episode_len': 2000,  # Extended for larger episodes
+        'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],  # Mapped from left->ee_cam, right->right_ee_cam
+        'state_dim': 8
+    },
+    'fr3_block_stacking_0915_55ep': {
+        'dataset_dir': '/boot/common_data/fr3_block_stacking_0915_55ep_hdf5',
+        'num_episodes': 53,  # Updated based on converted data
+        'episode_len': 2000,  # Extended for larger episodes
+        'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],  # Mapped from left->ee_cam, right->right_ee_cam
+        'state_dim': 8
+    },
+    'fr3_blockstacking_0916_50eps_fixloc': {
+        'dataset_dir': '/boot/common_data/fr3_blockstacking_0916_50eps_fixloc_hdf5',
+        'num_episodes': 50,  # Updated based on converted data
+        'episode_len': 2000,  # Extended for larger episodes
+        'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],  # Mapped from left->ee_cam, right->right_ee_cam
+        'state_dim': 8
+    },
+
+    # Example of multi-directory mixed training configuration
+    'fr3_mixed_training_example': {
+        'dataset_dir': [
+            '/boot/common_data/fr3_blockstacking_0918_24ep_random_hdf5',
+            '/boot/common_data/fr3_block_stacking_0915_55ep_hdf5',
+            '/boot/common_data/fr3_blockstacking_0916_50eps_fixloc_hdf5'
+        ],
+        # 'num_episodes': Auto-detected from all .hdf5 files in dataset_dir directories
+        'episode_len': 2000,  # Max episode length across all datasets
+        'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],  # Common cameras across datasets
+        'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
+    },
 }
 
 ### Simulation envs fixed constants
