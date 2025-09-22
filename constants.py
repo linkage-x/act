@@ -89,6 +89,15 @@ SIM_TASK_CONFIGS = {
         'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],  # Common cameras across datasets
         'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
     },
+
+    # Preprocessed block stacking dataset (optimized episode lengths)
+    'fr3_block_stacking_preprocessed': {
+        'dataset_dir': '/boot/common_data/fr3_blockstacking_preprocessed_hdf5',
+        'num_episodes': 50,  # Original episodes (may generate more segments)
+        'episode_len': 300,  # Optimized episode length after preprocessing
+        'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],
+        'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
+    },
 }
 
 ### Simulation envs fixed constants
