@@ -38,10 +38,6 @@ class PolicyInference(ABC):
         """加载数据集统计信息用于归一化"""
         stats_path = os.path.join(self.ckpt_dir, 'dataset_stats.pkl')
         
-        # 如果没有找到dataset_stats.pkl，尝试找dataset_stats_bac.pkl
-        if not os.path.exists(stats_path):
-            stats_path = os.path.join(self.ckpt_dir, 'dataset_stats_bac.pkl')
-            
         if not os.path.exists(stats_path):
             raise FileNotFoundError(f"找不到数据集统计文件: {stats_path}")
             
@@ -167,10 +163,6 @@ class ACTInference(PolicyInference):
         """加载ACT策略模型"""
         policy_path = os.path.join(self.ckpt_dir, 'policy_best.ckpt')
         
-        # 如果没有找到policy_best.ckpt，尝试找policy_best_bac.ckpt
-        if not os.path.exists(policy_path):
-            policy_path = os.path.join(self.ckpt_dir, 'policy_best_bac.ckpt')
-            
         if not os.path.exists(policy_path):
             raise FileNotFoundError(f"找不到策略文件: {policy_path}")
             
@@ -182,36 +174,3 @@ class ACTInference(PolicyInference):
     def forward_policy(self, state, images):
         """ACT策略前向推理"""
         return self.policy(state, images)
-
-
-class PPOInference(PolicyInference):
-    """PPO算法特定的推理器（示例，待实现）"""
-    
-    def __init__(self, ckpt_dir, state_dim, camera_names, **kwargs):
-        # PPO策略配置
-        policy_config = {
-            'state_dim': state_dim,
-            'action_dim': state_dim,
-            'camera_names': camera_names,
-            'hidden_dim': kwargs.get('hidden_dim', 256),
-            # 其他PPO特定参数...
-        }
-        
-        super().__init__(ckpt_dir, policy_config)
-        
-    def init_policy(self):
-        """初始化PPO策略"""
-        # TODO: 实现PPO策略初始化
-        # from ppo_policy import PPOPolicy
-        # self.policy = PPOPolicy(self.policy_config)
-        raise NotImplementedError("PPO推理器待实现")
-        
-    def load_policy(self):
-        """加载PPO策略模型"""
-        # TODO: 实现PPO模型加载
-        raise NotImplementedError("PPO推理器待实现")
-        
-    def forward_policy(self, state, images):
-        """PPO策略前向推理"""
-        # TODO: 实现PPO前向推理
-        raise NotImplementedError("PPO推理器待实现")

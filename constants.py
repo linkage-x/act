@@ -78,11 +78,11 @@ SIM_TASK_CONFIGS = {
     },
 
     # Example of multi-directory mixed training configuration
-    'fr3_mixed_training_example': {
+    'fr3_mixed_training_bs': {
         'dataset_dir': [
-            '/boot/common_data/fr3_blockstacking_0918_24ep_random_hdf5',
-            '/boot/common_data/fr3_block_stacking_0915_55ep_hdf5',
-            '/boot/common_data/fr3_blockstacking_0916_50eps_fixloc_hdf5'
+            '/boot/common_data/fr3_blockstacking_0916_50eps_fixloc_hdf5',
+            '/boot/common_data/fr3_block_stacking_0920_50ep_hdf5',
+            '/boot/common_data/fr3_pih_0923_25ep_fixloc_hdf5',
         ],
         # 'num_episodes': Auto-detected from all .hdf5 files in dataset_dir directories
         'episode_len': 2000,  # Max episode length across all datasets
@@ -91,13 +91,46 @@ SIM_TASK_CONFIGS = {
     },
 
     # Preprocessed block stacking dataset (optimized episode lengths)
-    'fr3_block_stacking_preprocessed': {
-        'dataset_dir': '/boot/common_data/fr3_blockstacking_preprocessed_hdf5',
-        'num_episodes': 50,  # Original episodes (may generate more segments)
-        'episode_len': 300,  # Optimized episode length after preprocessing
+    'fr3_bs_mix_ds_0924': {
+        'dataset_dir': ['/boot/common_data/fr3_bs_0916_50ep_ds_hdf5',
+            '/boot/common_data/fr3_bs_0920_50ep_ds_hdf5',],
+        'episode_len': 550,  # Optimized episode length after preprocessing
         'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],
         'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
     },
+    'fr3_bs_0916_50ep_ds': {
+                    'dataset_dir': ['/boot/common_data/fr3_bs_0916_50ep_ds_hdf5'],
+                            'episode_len': 550,  # Optimized episode length after preprocessing
+                                    'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],
+                                            'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
+                                                },
+    'fr3_mixed_training_pih': {
+        'dataset_dir': [
+            '/boot/common_data/fr3_peg_in_hole_0914_50ep_hdf5',
+            '/boot/common_data/fr3_peginhole_0918_48ep_hdf5',
+            '/boot/common_data/fr3_peg_in_hole_0920_50ep_hdf5'
+        ],
+        # 'num_episodes': Auto-detected from all .hdf5 files in dataset_dir directories
+        'episode_len': 2000,  # Max episode length across all datasets
+        'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],  # Common cameras across datasets
+        'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
+    },
+    'fr3_liquidtransfer_0920': {
+        'dataset_dir': [
+            '/boot/common_data/fr3_liquid_transfer_0920_50ep_hdf5',
+                                ],
+        'episode_len': 2000,  # Max episode length across all datasets
+        'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],  # Common cameras across datasets
+        'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
+    },
+    'fr3_pih_0918_48ep_ds': {
+                    'dataset_dir': ['/boot/common_data/fr3_pih_0918_48ep_ds_hdf5',
+                                    ],
+                            'episode_len': 600,  # Optimized episode length after preprocessing
+                                    'camera_names': ['ee_cam', 'third_person_cam', 'side_cam'],
+                                            'state_dim': 8  # FR3: 7 DOF arm + 1 DOF gripper
+                                                },
+
 }
 
 ### Simulation envs fixed constants
