@@ -270,6 +270,16 @@ class TaskConfigManager:
         if 'dataset_dirs' in data_config:
             legacy_task_config['dataset_dir'] = data_config['dataset_dirs']
 
+        # 辅助函数：转换字符串形式的科学记数法为浮点数
+        def parse_numeric(value):
+            if isinstance(value, str):
+                try:
+                    # 尝试转换为浮点数（支持科学记数法）
+                    return float(value)
+                except ValueError:
+                    return value
+            return value
+
         # 构造args字典（兼容现有参数格式）
         legacy_args = {
             'task_name': task_config.get('name'),
@@ -277,7 +287,7 @@ class TaskConfigManager:
             'policy_class': training_config.get('policy_class', 'ACT'),
             'batch_size': training_config.get('batch_size', 32),
             'num_epochs': training_config.get('num_epochs', 2000),
-            'lr': training_config.get('lr', 3e-5),
+            'lr': parse_numeric(training_config.get('lr', 3e-5)),
             'seed': training_config.get('seed', 0),
             'eval': False,  # 默认为训练模式
             'onscreen_render': training_config.get('onscreen_render', False),
