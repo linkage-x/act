@@ -75,22 +75,39 @@ class TaskConfigManager:
 
         # 如果是绝对路径，直接使用
         if path.is_absolute():
-            return path
+            if path.exists():
+                return path
+            raise FileNotFoundError(f"找不到配置文件: {config_path}")
 
-        # 尝试在config_root中查找
-        full_path = self.config_root / config_path
-        if full_path.exists():
-            return full_path
+        # 候选路径列表，按优先级排序
+        candidates = []
 
-        # 如果没有.yaml后缀，自动添加
+        # 1. 相对于config_root的路径
+        candidates.append(self.config_root / config_path)
+
+        # 2. 如果没有.yaml后缀，添加后缀再试
         if not config_path.endswith('.yaml'):
-            config_path_with_ext = config_path + '.yaml'
-            full_path_with_ext = self.config_root / config_path_with_ext
-            if full_path_with_ext.exists():
-                return full_path_with_ext
+            candidates.append(self.config_root / (config_path + '.yaml'))
 
-        # 如果都找不到，抛出错误
-        raise FileNotFoundError(f"找不到配置文件: {config_path}")
+        # 3. 相对于当前工作目录的路径
+        candidates.append(Path.cwd() / config_path)
+        if not config_path.endswith('.yaml'):
+            candidates.append(Path.cwd() / (config_path + '.yaml'))
+
+        # 4. 如果config_path不包含"configs/"前缀，尝试添加
+        if not config_path.startswith('configs/'):
+            candidates.append(self.config_root.parent / config_path)
+            if not config_path.endswith('.yaml'):
+                candidates.append(self.config_root.parent / (config_path + '.yaml'))
+
+        # 按顺序检查所有候选路径
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        # 如果都找不到，抛出错误并显示尝试过的路径
+        tried_paths = [str(c) for c in candidates]
+        raise FileNotFoundError(f"找不到配置文件: {config_path}\n尝试过的路径: {tried_paths}")
 
     def load_config_with_inheritance(self, config_path: str) -> Dict[str, Any]:
         """
