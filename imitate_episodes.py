@@ -1,6 +1,7 @@
 import torch
 import numpy as np
-import os,sys
+import os
+import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import pickle
 import argparse
@@ -415,22 +416,30 @@ def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--eval', action='store_true')
-    parser.add_argument('--onscreen_render', action='store_true')
-    parser.add_argument('--ckpt_dir', action='store', type=str, help='ckpt_dir', required=True)
-    parser.add_argument('--policy_class', action='store', type=str, help='policy_class, capitalize', required=True)
-    parser.add_argument('--task_name', action='store', type=str, help='task_name', required=True)
-    parser.add_argument('--batch_size', action='store', type=int, help='batch_size', required=True)
-    parser.add_argument('--seed', action='store', type=int, help='seed', required=True)
-    parser.add_argument('--num_epochs', action='store', type=int, help='num_epochs', required=True)
-    parser.add_argument('--lr', action='store', type=float, help='lr', required=True)
+    parser = argparse.ArgumentParser(description='ACT训练脚本 - 使用配置文件管理参数')
+    parser.add_argument('--config', type=str, required=True,
+                       help='配置文件路径 (例如: configs/tasks/fr3_bs_0916_50ep_ds.yaml)')
+    parser.add_argument('--eval', action='store_true',
+                       help='评估模式')
 
-    # for ACT
-    parser.add_argument('--kl_weight', action='store', type=int, help='KL Weight', required=False)
-    parser.add_argument('--chunk_size', action='store', type=int, help='chunk_size', required=False)
-    parser.add_argument('--hidden_dim', action='store', type=int, help='hidden_dim', required=False)
-    parser.add_argument('--dim_feedforward', action='store', type=int, help='dim_feedforward', required=False)
-    parser.add_argument('--temporal_agg', action='store_true')
-    
-    main(vars(parser.parse_args()))
+    args = parser.parse_args()
+
+    # 加载配置
+    try:
+        from task_config_manager import load_task_config
+        config_data = load_task_config(args.config, eval_mode=args.eval)
+
+        print(f"✓ 配置文件加载成功: {args.config}")
+        print(f"  任务名: {config_data['args']['task_name']}")
+        print(f"  机器人: {config_data['config']['robot']['name']}")
+        print(f"  数据集: {config_data['task_config']['dataset_dir']}")
+        print(f"  模式: {'评估' if args.eval else '训练'}")
+        print()
+
+        # 运行主函数
+        main(config_data['args'])
+
+    except Exception as e:
+        print(f"❌ 配置加载失败: {e}")
+        print("请检查配置文件路径和格式是否正确")
+        sys.exit(1)

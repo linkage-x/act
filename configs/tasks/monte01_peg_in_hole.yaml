@@ -1,0 +1,18 @@
+# Monte01 Peg in Hole Task
+# 对应 constants.py 中的 monte01_peg_in_hole 配置
+
+extends: base/monte01
+
+task:
+  name: monte01_peg_in_hole
+
+data:
+  dataset_dir: /boot/common_data/peg_in_hole_hdf5
+  num_episodes: 46
+  episode_len: 2000
+
+training:
+  ckpt_dir: ckpts/monte01_peg_in_hole
+  batch_size: 256  # 双臂数据较大，使用较小batch size
+  num_epochs: 8000
+  lr: 1e-4
