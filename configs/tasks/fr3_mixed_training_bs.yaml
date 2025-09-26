@@ -1,0 +1,24 @@
+# FR3 Mixed Training - Block Stacking
+# 对应 constants.py 中的 fr3_mixed_training_bs 配置
+# 混合多个数据集进行训练
+
+extends: base/fr3
+
+task:
+  name: fr3_mixed_training_bs
+
+data:
+  # 混合多个block stacking数据集
+  dataset_dirs:
+    - /boot/common_data/fr3_blockstacking_0916_50eps_fixloc_hdf5
+    - /boot/common_data/fr3_block_stacking_0920_50ep_hdf5
+    - /boot/common_data/fr3_pih_0923_25ep_fixloc_hdf5
+
+  episode_len: 2000  # 跨数据集的最大episode长度
+  # num_episodes 自动从数据集中检测
+
+training:
+  ckpt_dir: ckpts/fr3_mixed_training_bs
+  batch_size: 256  # 混合数据集使用较小batch size
+  num_epochs: 8000
+  lr: 1e-4

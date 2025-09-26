@@ -1,0 +1,35 @@
+# ACT训练默认配置
+# 包含通用的训练超参数和数据设置
+
+training:
+  # 基础训练参数
+  policy_class: ACT
+  batch_size: 64
+  num_epochs: 2000
+  lr: 5e-5
+  seed: 0
+  onscreen_render: false
+  temporal_agg: false
+
+  # ACT特定超参数
+  kl_weight: 10
+  chunk_size: 100
+  hidden_dim: 512
+  dim_feedforward: 3200
+
+data:
+  # 数据路径配置
+  data_dir_base: /boot/common_data
+  data_dir_suffix: _hdf5
+
+  # 默认数据设置
+  episode_len: 500
+
+robot:
+  # 机器人基础配置（子配置会覆盖）
+  name: unknown
+  state_dim: 8  # 默认值，具体机器人配置会覆盖
+
+task:
+  # 任务基础配置
+  name: default_task

@@ -1,6 +1,7 @@
 import torch
 import numpy as np
-import os,sys
+import os
+import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import pickle
 import argparse
@@ -8,6 +9,7 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 from tqdm import tqdm
 from einops import rearrange
+import yaml
 
 from constants import DT
 from constants import PUPPET_GRIPPER_JOINT_OPEN
@@ -23,6 +25,17 @@ e = IPython.embed
 
 def main(args):
     set_seed(1)
+
+    # 打印关键参数确认
+    print("🚀 开始训练进程...")
+    print(f"📋 任务: {args['task_name']}")
+    print(f"⚙️  模式: {'评估' if args['eval'] else '训练'}")
+    print(f"🎯 策略: {args['policy_class']}")
+    print(f"📏 批大小: {args['batch_size']}")
+    print(f"🔢 轮数: {args['num_epochs']}")
+    print(f"📈 学习率: {args['lr']:.6f}")
+    print()
+
     # command line parameters
     is_eval = args['eval']
     ckpt_dir = args['ckpt_dir']
@@ -101,7 +114,17 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len)
+    # 加载光照增强配置
+    augmentation_config = None
+    lighting_config_path = os.path.join(os.path.dirname(__file__), 'configs', 'lighting_augmentation.yaml')
+    if os.path.exists(lighting_config_path):
+        with open(lighting_config_path, 'r', encoding='utf-8') as f:
+            augmentation_config = yaml.safe_load(f)
+        print(f"✅ 已加载光照增强配置: {lighting_config_path}")
+    else:
+        print(f"⚠️  光照增强配置文件不存在: {lighting_config_path}")
+
+    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len, augmentation_config)
 
     # save dataset stats
     if not os.path.isdir(ckpt_dir):
@@ -329,14 +352,38 @@ def train_bc(train_dataloader, val_dataloader, config):
 
     set_seed(seed)
 
+    print("🏗️  初始化模型和优化器...")
     policy = make_policy(policy_class, policy_config)
     policy.cuda()
     optimizer = make_optimizer(policy_class, policy)
+
+    # 打印模型和优化器信息
+    total_params = sum(p.numel() for p in policy.parameters())
+    trainable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+
+    print(f"🧠 模型参数统计:")
+    print(f"  总参数数量:   {total_params/1e6:.2f}M")
+    print(f"  可训练参数:   {trainable_params/1e6:.2f}M")
+    print(f"  参数利用率:   {trainable_params/total_params*100:.1f}%")
+
+    print(f"⚡ 优化器配置:")
+    print(f"  优化器类型:   {type(optimizer).__name__}")
+    for group in optimizer.param_groups:
+        print(f"  学习率:       {group['lr']:.8f}")
+        if 'weight_decay' in group:
+            print(f"  权重衰减:     {group['weight_decay']}")
+        break  # 只打印第一个参数组
+    print()
 
     train_history = []
     validation_history = []
     min_val_loss = np.inf
     best_ckpt_info = None
+
+    print("=" * 60)
+    print("🎓 开始训练循环")
+    print("=" * 60)
+
     for epoch in tqdm(range(num_epochs)):
         print(f'\nEpoch {epoch}')
         # validation
@@ -415,22 +462,74 @@ def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--eval', action='store_true')
-    parser.add_argument('--onscreen_render', action='store_true')
-    parser.add_argument('--ckpt_dir', action='store', type=str, help='ckpt_dir', required=True)
-    parser.add_argument('--policy_class', action='store', type=str, help='policy_class, capitalize', required=True)
-    parser.add_argument('--task_name', action='store', type=str, help='task_name', required=True)
-    parser.add_argument('--batch_size', action='store', type=int, help='batch_size', required=True)
-    parser.add_argument('--seed', action='store', type=int, help='seed', required=True)
-    parser.add_argument('--num_epochs', action='store', type=int, help='num_epochs', required=True)
-    parser.add_argument('--lr', action='store', type=float, help='lr', required=True)
+    parser = argparse.ArgumentParser(description='ACT训练脚本 - 使用配置文件管理参数')
+    parser.add_argument('--config', type=str, required=True,
+                       help='配置文件路径 (例如: configs/tasks/fr3_bs_0916_50ep_ds.yaml)')
+    parser.add_argument('--eval', action='store_true',
+                       help='评估模式')
 
-    # for ACT
-    parser.add_argument('--kl_weight', action='store', type=int, help='KL Weight', required=False)
-    parser.add_argument('--chunk_size', action='store', type=int, help='chunk_size', required=False)
-    parser.add_argument('--hidden_dim', action='store', type=int, help='hidden_dim', required=False)
-    parser.add_argument('--dim_feedforward', action='store', type=int, help='dim_feedforward', required=False)
-    parser.add_argument('--temporal_agg', action='store_true')
-    
-    main(vars(parser.parse_args()))
+    args = parser.parse_args()
+
+    # 加载配置
+    try:
+        from task_config_manager import load_task_config
+        config_data = load_task_config(args.config, eval_mode=args.eval)
+
+        print(f"✓ 配置文件加载成功: {args.config}")
+        print(f"  任务名: {config_data['args']['task_name']}")
+        print(f"  机器人: {config_data['config']['robot']['name']}")
+        print(f"  数据集: {config_data['task_config']['dataset_dir']}")
+        print(f"  模式: {'评估' if args.eval else '训练'}")
+        print()
+
+        # 详细打印训练超参数
+        print("=" * 60)
+        print("🔧 训练超参数配置")
+        print("=" * 60)
+
+        args_data = config_data['args']
+        task_data = config_data['task_config']
+
+        print("📊 基础训练参数:")
+        print(f"  策略类型:     {args_data['policy_class']}")
+        print(f"  批大小:       {args_data['batch_size']}")
+        print(f"  训练轮数:     {args_data['num_epochs']}")
+        print(f"  学习率:       {args_data['lr']:.6f}")
+        print(f"  随机种子:     {args_data['seed']}")
+        print()
+
+        print("🤖 ACT模型参数:")
+        print(f"  KL权重:       {args_data['kl_weight']}")
+        print(f"  动作块大小:   {args_data['chunk_size']}")
+        print(f"  隐藏层维度:   {args_data['hidden_dim']}")
+        print(f"  前馈网络维度: {args_data['dim_feedforward']}")
+        print()
+
+        print("📁 数据配置:")
+        print(f"  状态维度:     {task_data['state_dim']}")
+        print(f"  Episode长度:  {task_data['episode_len']}")
+        print(f"  Episode数量:  {task_data.get('num_episodes', 'Auto-detect')}")
+        print(f"  相机:         {task_data['camera_names']}")
+        print()
+
+        print("💾 存储配置:")
+        print(f"  检查点目录:   {args_data['ckpt_dir']}")
+        print(f"  时序聚合:     {args_data['temporal_agg']}")
+        print(f"  屏幕渲染:     {args_data['onscreen_render']}")
+        print()
+
+        print("=" * 60)
+        print()
+
+        # 将task_config注入到constants模块，以便兼容旧代码
+        from constants import SIM_TASK_CONFIGS
+        task_name = config_data['args']['task_name']
+        SIM_TASK_CONFIGS[task_name] = config_data['task_config']
+
+        # 运行主函数
+        main(config_data['args'])
+
+    except Exception as e:
+        print(f"❌ 配置加载失败: {e}")
+        print("请检查配置文件路径和格式是否正确")
+        sys.exit(1)

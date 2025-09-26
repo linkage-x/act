@@ -1,0 +1,17 @@
+# FR3 Liquid Transfer 2024-09-20 50 Episodes (Downsampled)
+# 对应 constants.py 中的 fr3_liquidtransfer_0920 配置
+
+extends: base/fr3
+
+task:
+  name: fr3_liquid_transfer_0920_50ep_ds
+
+data:
+  dataset_dir: auto
+  episode_len: 500  # 经过预处理优化的长度
+
+training:
+  ckpt_dir: ckpts/fr3_liquid_transfer_0920_50ep_ds
+  batch_size: 512
+  num_epochs: 8000
+  lr: 1e-4

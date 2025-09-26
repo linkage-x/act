@@ -1,0 +1,24 @@
+# Monte01双臂机器人基础配置
+# 继承默认配置并针对Monte01机器人进行定制
+
+extends: base/default
+
+robot:
+  name: monte01
+  state_dim: 16  # 双臂: (7+1) * 2
+
+data:
+  # Monte01双臂机器人的相机配置
+  camera_names:
+    - ee_cam
+    - right_ee_cam
+    - third_person_cam
+
+  # Monte01任务的常用episode长度
+  episode_len: 2000
+
+training:
+  # Monte01任务的推荐训练参数
+  batch_size: 256
+  num_epochs: 8000
+  lr: 1e-4

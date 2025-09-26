@@ -1,0 +1,24 @@
+# FR3机器人基础配置
+# 继承默认配置并针对FR3机器人进行定制
+
+extends: base/default
+
+robot:
+  name: fr3
+  state_dim: 8  # 7 DOF arm + 1 gripper
+
+data:
+  # FR3常用相机配置
+  camera_names:
+    - ee_cam
+    - third_person_cam
+    - side_cam
+
+  # FR3任务的常用episode长度
+  episode_len: 800
+
+training:
+  # FR3任务的推荐训练参数
+  batch_size: 64
+  num_epochs: 8000
+  lr: 5e-5

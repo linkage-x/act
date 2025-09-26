@@ -1,0 +1,41 @@
+# 新任务配置模板
+# 复制此文件并修改相关参数以创建新任务
+
+extends: base/fr3  # 或 base/monte01，根据机器人类型选择
+
+task:
+  name: new_task_name  # 修改为实际任务名
+
+data:
+  # 方式1: 自动推断数据路径
+  dataset_dir: auto  # 将自动设置为 /boot/common_data/{task_name}_hdf5
+
+  # 方式2: 指定具体数据路径
+  # dataset_dir: /path/to/your/dataset
+
+  # 方式3: 混合多个数据集
+  # dataset_dirs:
+  #   - /path/to/dataset1
+  #   - /path/to/dataset2
+
+  num_episodes: 50    # 可选，不指定时自动检测
+  episode_len: 2000   # 根据实际数据调整
+
+  # 如果相机配置与基础配置不同，可在此覆盖
+  # camera_names:
+  #   - ee_cam
+  #   - third_person_cam
+
+training:
+  ckpt_dir: ckpts/new_task_name  # 修改为实际路径
+
+  # 以下参数可根据需要调整，不指定时使用基础配置的默认值
+  batch_size: 512
+  num_epochs: 8000
+  lr: 1e-4
+
+  # ACT特定参数（一般不需要修改）
+  # kl_weight: 10
+  # chunk_size: 100
+  # hidden_dim: 512
+  # dim_feedforward: 3200
