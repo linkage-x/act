@@ -22,7 +22,13 @@ class TaskConfigManager:
             config_root: 配置文件根目录，默认为当前脚本目录下的configs
         """
         if config_root is None:
-            self.config_root = Path(__file__).parent / 'configs'
+            # 首先尝试当前工作目录下的configs
+            cwd_configs = Path.cwd() / 'configs'
+            if cwd_configs.exists():
+                self.config_root = cwd_configs
+            else:
+                # 回退到脚本目录下的configs
+                self.config_root = Path(__file__).parent / 'configs'
         else:
             self.config_root = Path(config_root)
 
