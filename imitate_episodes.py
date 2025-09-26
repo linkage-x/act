@@ -24,6 +24,17 @@ e = IPython.embed
 
 def main(args):
     set_seed(1)
+
+    # 打印关键参数确认
+    print("🚀 开始训练进程...")
+    print(f"📋 任务: {args['task_name']}")
+    print(f"⚙️  模式: {'评估' if args['eval'] else '训练'}")
+    print(f"🎯 策略: {args['policy_class']}")
+    print(f"📏 批大小: {args['batch_size']}")
+    print(f"🔢 轮数: {args['num_epochs']}")
+    print(f"📈 学习率: {args['lr']:.6f}")
+    print()
+
     # command line parameters
     is_eval = args['eval']
     ckpt_dir = args['ckpt_dir']
@@ -330,14 +341,38 @@ def train_bc(train_dataloader, val_dataloader, config):
 
     set_seed(seed)
 
+    print("🏗️  初始化模型和优化器...")
     policy = make_policy(policy_class, policy_config)
     policy.cuda()
     optimizer = make_optimizer(policy_class, policy)
+
+    # 打印模型和优化器信息
+    total_params = sum(p.numel() for p in policy.parameters())
+    trainable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+
+    print(f"🧠 模型参数统计:")
+    print(f"  总参数数量:   {total_params/1e6:.2f}M")
+    print(f"  可训练参数:   {trainable_params/1e6:.2f}M")
+    print(f"  参数利用率:   {trainable_params/total_params*100:.1f}%")
+
+    print(f"⚡ 优化器配置:")
+    print(f"  优化器类型:   {type(optimizer).__name__}")
+    for group in optimizer.param_groups:
+        print(f"  学习率:       {group['lr']:.8f}")
+        if 'weight_decay' in group:
+            print(f"  权重衰减:     {group['weight_decay']}")
+        break  # 只打印第一个参数组
+    print()
 
     train_history = []
     validation_history = []
     min_val_loss = np.inf
     best_ckpt_info = None
+
+    print("=" * 60)
+    print("🎓 开始训练循环")
+    print("=" * 60)
+
     for epoch in tqdm(range(num_epochs)):
         print(f'\nEpoch {epoch}')
         # validation
@@ -434,6 +469,45 @@ if __name__ == '__main__':
         print(f"  机器人: {config_data['config']['robot']['name']}")
         print(f"  数据集: {config_data['task_config']['dataset_dir']}")
         print(f"  模式: {'评估' if args.eval else '训练'}")
+        print()
+
+        # 详细打印训练超参数
+        print("=" * 60)
+        print("🔧 训练超参数配置")
+        print("=" * 60)
+
+        args_data = config_data['args']
+        task_data = config_data['task_config']
+
+        print("📊 基础训练参数:")
+        print(f"  策略类型:     {args_data['policy_class']}")
+        print(f"  批大小:       {args_data['batch_size']}")
+        print(f"  训练轮数:     {args_data['num_epochs']}")
+        print(f"  学习率:       {args_data['lr']:.6f}")
+        print(f"  随机种子:     {args_data['seed']}")
+        print()
+
+        print("🤖 ACT模型参数:")
+        print(f"  KL权重:       {args_data['kl_weight']}")
+        print(f"  动作块大小:   {args_data['chunk_size']}")
+        print(f"  隐藏层维度:   {args_data['hidden_dim']}")
+        print(f"  前馈网络维度: {args_data['dim_feedforward']}")
+        print()
+
+        print("📁 数据配置:")
+        print(f"  状态维度:     {task_data['state_dim']}")
+        print(f"  Episode长度:  {task_data['episode_len']}")
+        print(f"  Episode数量:  {task_data.get('num_episodes', 'Auto-detect')}")
+        print(f"  相机:         {task_data['camera_names']}")
+        print()
+
+        print("💾 存储配置:")
+        print(f"  检查点目录:   {args_data['ckpt_dir']}")
+        print(f"  时序聚合:     {args_data['temporal_agg']}")
+        print(f"  屏幕渲染:     {args_data['onscreen_render']}")
+        print()
+
+        print("=" * 60)
         print()
 
         # 将task_config注入到constants模块，以便兼容旧代码
