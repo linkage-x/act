@@ -436,6 +436,11 @@ if __name__ == '__main__':
         print(f"  模式: {'评估' if args.eval else '训练'}")
         print()
 
+        # 将task_config注入到constants模块，以便兼容旧代码
+        from constants import SIM_TASK_CONFIGS
+        task_name = config_data['args']['task_name']
+        SIM_TASK_CONFIGS[task_name] = config_data['task_config']
+
         # 运行主函数
         main(config_data['args'])
 
