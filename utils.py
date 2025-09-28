@@ -4,14 +4,11 @@ import os
 import h5py
 from torch.utils.data import TensorDataset, DataLoader
 
-# 导入数据增强模块
-from data_augmentation import create_training_augmentation
-
 import IPython
 e = IPython.embed
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len, augmentation_config=None):
+    def __init__(self, episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.episode_id_to_dir = episode_id_to_dir
@@ -19,15 +16,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.norm_stats = norm_stats
         self.episode_len = episode_len
         self.is_sim = None
-
-        # 初始化数据增强
-        if augmentation_config is not None:
-            self.augmentation_fn = create_training_augmentation(augmentation_config)
-            print("✅ 训练数据增强已启用")
-        else:
-            self.augmentation_fn = None
-            print("ℹ️ 训练数据增强已禁用")
-
         # Validate episodes and filter out corrupted ones
         self.valid_episode_ids = self._validate_episodes()
         if len(self.valid_episode_ids) > 0:
@@ -142,11 +130,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         # normalize image and change dtype to float
         image_data = image_data / 255.0
-
-        # 应用数据增强（仅在训练时）
-        if self.augmentation_fn is not None:
-            image_data = self.augmentation_fn(image_data)
-
         action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
 
@@ -191,7 +174,7 @@ def get_norm_stats(dataset_dirs, episode_id_to_dir, episode_ids):
     return stats
 
 
-def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len=None, augmentation_config=None):
+def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len=None):
     # Support both single directory (string) and multiple directories (list)
     if isinstance(dataset_dir, str):
         dataset_dirs = [dataset_dir]
@@ -279,8 +262,8 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
         episode_len = 5000  # Use the max from constants.py
 
     # construct dataset and dataloader
-    train_dataset = EpisodicDataset(train_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len, augmentation_config)
-    val_dataset = EpisodicDataset(val_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len)  # 验证集不使用增强
+    train_dataset = EpisodicDataset(train_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len)
+    val_dataset = EpisodicDataset(val_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
 
