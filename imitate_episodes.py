@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 from tqdm import tqdm
 from einops import rearrange
+import yaml
 
 from constants import DT
 from constants import PUPPET_GRIPPER_JOINT_OPEN
@@ -113,7 +114,17 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len)
+    # 加载光照增强配置
+    augmentation_config = None
+    lighting_config_path = os.path.join(os.path.dirname(__file__), 'configs', 'lighting_augmentation.yaml')
+    if os.path.exists(lighting_config_path):
+        with open(lighting_config_path, 'r', encoding='utf-8') as f:
+            augmentation_config = yaml.safe_load(f)
+        print(f"✅ 已加载光照增强配置: {lighting_config_path}")
+    else:
+        print(f"⚠️  光照增强配置文件不存在: {lighting_config_path}")
+
+    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len, augmentation_config)
 
     # save dataset stats
     if not os.path.isdir(ckpt_dir):
