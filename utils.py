@@ -26,7 +26,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
             print("✅ 训练数据增强已启用")
         else:
             self.augmentation_fn = None
-            print("ℹ️ 训练数据增强已禁用3")
+            print("ℹ️ 训练数据增强已禁用")
         # Validate episodes and filter out corrupted ones
         self.valid_episode_ids = self._validate_episodes()
         if len(self.valid_episode_ids) > 0:

@@ -18,7 +18,7 @@ class LightingAugmentationTransform:
 
         if not self.enabled:
             self.transform = None
-            print("ℹ️ 训练数据增强已禁用1")
+            print("ℹ️ 训练数据增强已禁用")
             return
 
         # 颜色抖动参数
@@ -150,7 +150,7 @@ def create_training_augmentation(config):
     lighting_config = config.get('lighting_augmentation', {})
 
     if not lighting_config.get('enabled', True):
-        print("ℹ️ 训练数据增强已禁用2")
+        print("ℹ️ 训练数据增强已禁用")
         return None
 
     # 创建基础增强
