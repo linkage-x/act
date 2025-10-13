@@ -4,4 +4,4 @@ export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
 # 使用配置文件的简化训练脚本
 CUDA_VISIBLE_DEVICES=6 python3 imitate_episodes.py \
-  --config configs/tasks/fr3_st_0928_56ep_rs.yaml
+  --config configs/tasks/fr3_it_1013_51ep.yaml
