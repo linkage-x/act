@@ -3,7 +3,7 @@
 
 lighting_augmentation:
   # 是否启用光照增强 (设为false可快速禁用)
-  enabled: true
+  enabled: false
 
   # 颜色抖动参数 (取值范围 0-1)
   brightness: 0.3    # 亮度变化范围 ±30%
