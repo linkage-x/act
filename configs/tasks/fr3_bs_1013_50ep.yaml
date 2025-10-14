@@ -16,4 +16,4 @@ training:
   ckpt_dir: ckpts/fr3_bs_1013_50ep
   batch_size: 512
   num_epochs: 8000
-  lr: 1e-4
+  lr: 5e-5
