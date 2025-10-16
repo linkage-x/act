@@ -3,6 +3,87 @@ import numpy as np
 from torchvision import transforms
 import random
 
+class RotationAugmentationTransform:
+    """相机图片角度增强（旋转）
+
+    对指定的相机视图应用随机小角度旋转，以增强模型对相机角度变化的鲁棒性
+    """
+
+    def __init__(self, config, camera_names):
+        """
+        Args:
+            config: 旋转增强配置字典
+            camera_names: 所有相机名称列表
+        """
+        self.enabled = config.get('enabled', True)
+
+        if not self.enabled:
+            self.rotation_angles = None
+            print("ℹ️ 旋转数据增强已禁用")
+            return
+
+        # 获取旋转角度范围（单位：度）
+        self.max_rotation_degrees = config.get('max_rotation_degrees', 5.0)
+
+        # 获取需要应用旋转的相机列表
+        target_cameras = config.get('target_cameras', [])
+
+        # 创建相机索引映射
+        self.camera_mask = []
+        for cam_name in camera_names:
+            should_rotate = cam_name in target_cameras
+            self.camera_mask.append(should_rotate)
+
+        self.camera_names = camera_names
+        self.target_cameras = target_cameras
+
+        if not any(self.camera_mask):
+            print("⚠️ 未指定有效的旋转相机，旋转增强将被禁用")
+            self.enabled = False
+            return
+
+        enabled_cameras = [cam_name for cam_name, mask in zip(camera_names, self.camera_mask) if mask]
+        print(f"✅ 旋转数据增强已启用: ±{self.max_rotation_degrees}° for cameras: {enabled_cameras}")
+
+    def __call__(self, images):
+        """
+        对指定相机的图像应用随机旋转
+
+        Args:
+            images: Tensor of shape (N, C, H, W), values in [0, 1]
+                    N 对应不同的相机视图
+
+        Returns:
+            增强后的图像，相同形状
+        """
+        if not self.enabled or images.dim() != 4:
+            return images
+
+        batch_size = images.shape[0]
+        result_images = []
+
+        for i in range(batch_size):
+            img = images[i]  # (C, H, W)
+
+            # 检查该相机是否需要旋转
+            if i < len(self.camera_mask) and self.camera_mask[i]:
+                # 随机生成旋转角度
+                angle = random.uniform(-self.max_rotation_degrees, self.max_rotation_degrees)
+
+                # 使用torchvision的旋转函数
+                # 注意：需要先转为PIL兼容格式，或使用functional API
+                rotated_img = transforms.functional.rotate(img, angle,
+                                                           interpolation=transforms.InterpolationMode.BILINEAR,
+                                                           expand=False,
+                                                           fill=0)
+                result_images.append(rotated_img)
+            else:
+                # 不旋转的相机直接添加
+                result_images.append(img)
+
+        return torch.stack(result_images)
+
+
 class LightingAugmentationTransform:
     """基于PyTorch transforms的光照增强
 
@@ -138,29 +219,56 @@ class RandomLightingAugmentation:
             return images
 
 
-def create_training_augmentation(config):
-    """创建训练时的光照增强管道
+class ComposedAugmentation:
+    """组合多个增强变换"""
+
+    def __init__(self, transforms_list):
+        self.transforms = transforms_list
+
+    def __call__(self, images):
+        for transform in self.transforms:
+            if transform is not None:
+                images = transform(images)
+        return images
+
+
+def create_training_augmentation(config, camera_names=None):
+    """创建训练时的数据增强管道
 
     Args:
         config: 增强配置字典
+        camera_names: 相机名称列表（旋转增强需要）
 
     Returns:
-        增强函数，接受图像tensor并返回增强后的tensor，如果禁用则返回None
+        增强函数，接受图像tensor并返回增强后的tensor，如果全部禁用则返回None
     """
-    lighting_config = config.get('lighting_augmentation', {})
+    augmentations = []
 
-    if not lighting_config.get('enabled', True):
+    # 1. 旋转增强（应用在最前面，在归一化之前）
+    rotation_config = config.get('rotation_augmentation', {})
+    if rotation_config.get('enabled', False):
+        if camera_names is None:
+            print("⚠️ 旋转增强需要camera_names参数，已跳过")
+        else:
+            rotation_aug = RotationAugmentationTransform(rotation_config, camera_names)
+            if rotation_aug.enabled:
+                augmentations.append(rotation_aug)
+
+    # 2. 光照增强
+    lighting_config = config.get('lighting_augmentation', {})
+    if lighting_config.get('enabled', True):
+        lighting_aug = LightingAugmentationTransform(lighting_config)
+        if lighting_aug.transform is not None:
+            # 可选：添加随机性控制
+            augmentation_probability = lighting_config.get('probability', 1.0)
+            if augmentation_probability < 1.0:
+                lighting_aug = RandomLightingAugmentation(lighting_aug, augmentation_probability)
+            augmentations.append(lighting_aug)
+
+    # 如果没有任何增强，返回None
+    if not augmentations:
         print("ℹ️ 训练数据增强已禁用")
         return None
 
-    # 创建基础增强
-    base_augmentation = LightingAugmentationTransform(lighting_config)
-
-    # 可选：添加随机性控制
-    augmentation_probability = lighting_config.get('probability', 1.0)
-    if augmentation_probability < 1.0:
-        augmentation = RandomLightingAugmentation(base_augmentation, augmentation_probability)
-    else:
-        augmentation = base_augmentation
-
-    return augmentation
+    # 组合所有增强
+    return ComposedAugmentation(augmentations)

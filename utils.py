@@ -20,9 +20,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.episode_len = episode_len
         self.is_sim = None
 
-        # 初始化数据增强
+        # 初始化数据增强（传递camera_names以支持相机特定的增强）
         if augmentation_config is not None:
-            self.augmentation_fn = create_training_augmentation(augmentation_config)
+            self.augmentation_fn = create_training_augmentation(augmentation_config, camera_names)
             print("✅ 训练数据增强已启用")
         else:
             self.augmentation_fn = None
@@ -278,6 +278,7 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
         episode_len = 5000  # Use the max from constants.py
 
     # construct dataset and dataloader
+    # 注意：需要将camera_names传递给augmentation pipeline以支持相机特定的增强
     train_dataset = EpisodicDataset(train_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len, augmentation_config)
     val_dataset = EpisodicDataset(val_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len)  # 验证集不使用增强
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
