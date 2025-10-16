@@ -4,16 +4,16 @@
 extends: base/fr3
 
 task:
-  name: fr3_pp_1015_269ep
+  name: fr3_pp_1015_267ep
 
 data:
   dataset_dirs:
     - /boot/common_data/2025/fr3/1015_pick_and_place_fr3_3dmouse_250ep_hdf5
   episode_len: 500  # 经过预处理优化的长度
-  num_episodes: 269
+  num_episodes: 267
 
 training:
-  ckpt_dir: ckpts/fr3_pp_1015_269ep
+  ckpt_dir: ckpts/fr3_pp_1015_267ep
   batch_size: 64
   num_epochs: 8000
   lr: 5e-5
