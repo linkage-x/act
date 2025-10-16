@@ -8,12 +8,12 @@ task:
 
 data:
   dataset_dirs:
-    - /boot/common_data/1013_stack_blocks_fr3_pika_3dmouse_50ep_hdf5
+    - /boot/common_data/2025/fr3/1013_stack_blocks_fr3_pika_3dmouse_50ep_hdf5
   episode_len: 500  # 经过预处理优化的长度
   num_episodes: 50
 
 training:
   ckpt_dir: ckpts/fr3_bs_1013_50ep
-  batch_size: 512
+  batch_size: 64
   num_epochs: 8000
   lr: 5e-5
