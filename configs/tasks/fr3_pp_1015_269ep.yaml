@@ -8,7 +8,7 @@ task:
 
 data:
   dataset_dirs:
-    - /boot/common_data/1015_pick_and_place_fr3_3dmouse_250ep_hdf5
+    - /boot/common_data/2025/fr3/1015_pick_and_place_fr3_3dmouse_250ep_hdf5
   episode_len: 500  # 经过预处理优化的长度
   num_episodes: 269
 
