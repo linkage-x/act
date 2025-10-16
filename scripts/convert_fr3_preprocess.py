@@ -43,8 +43,8 @@ def load_and_resize_image_robust(image_path, target_size=(480, 640), fallback_co
 def robot_to_act_joint_mapping(joint_pos, joint_vel, gripper_pos, is_dual_arm=False,
                             right_joint_pos=None, right_joint_vel=None, right_gripper_pos=None):
     """Map robot joints to ACT action space - supports both single-arm and dual-arm
-    Single-arm (FR3): 8 DOF with gripper range 0-0.08m
-    Dual-arm (Monte01): 16 DOF with gripper range 0-0.074m
+    Single-arm (FR3): 8 DOF with gripper original data
+    Dual-arm (Monte01): 16 DOF with gripper original data
     """
 
     if is_dual_arm and right_joint_pos is not None:
@@ -73,8 +73,7 @@ def robot_to_act_joint_mapping(joint_pos, joint_vel, gripper_pos, is_dual_arm=Fa
         act_qpos[:7] = joint_pos[:7]
         act_qvel[:7] = joint_vel[:7]
 
-        # Gripper (1 DOF) - normalize from 0-0.08m to 0-1
-        act_qpos[7] = gripper_pos / 0.08
+        act_qpos[7] = gripper_pos
         act_qvel[7] = 0.0
 
     return act_qpos, act_qvel
