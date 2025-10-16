@@ -15,16 +15,13 @@ def load_and_resize_image_robust(image_path, target_size=(480, 640), fallback_co
     """Load image and resize, with robust error handling"""
     # Handle None path by returning fallback
     if image_path is None:
-        img = np.full((target_size[0], target_size[1], 3), fallback_color, dtype=np.uint8)
-        return img
+        return False, None
 
     try:
         img = cv2.imread(image_path)
         if img is None:
-            print(f"    ⚠️  Warning: Could not load image {image_path}, using fallback")
-            # Create a gray fallback image
-            img = np.full((target_size[0], target_size[1], 3), fallback_color, dtype=np.uint8)
-            return img
+            print(f"    ⚠️  Warning: Could not load image {image_path}")
+            return False, None
 
         # Convert BGR to RGB
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -35,10 +32,9 @@ def load_and_resize_image_robust(image_path, target_size=(480, 640), fallback_co
 
         return img
     except Exception as e:
-        print(f"    ⚠️  Exception loading {image_path}: {e}, using fallback")
+        print(f"    ⚠️  Exception loading {image_path}: {e}")
         # Create a fallback image
-        img = np.full((target_size[0], target_size[1], 3), fallback_color, dtype=np.uint8)
-        return img
+        return False, None
 
 def robot_to_act_joint_mapping(joint_pos, joint_vel, gripper_pos, is_dual_arm=False,
                             right_joint_pos=None, right_joint_vel=None, right_gripper_pos=None):
@@ -591,13 +587,13 @@ def convert_segment_to_hdf5(data_points, episode_dir, output_path, image_size=(4
                 elif act_cam_name == 'side_cam':
                     act_cam_name = 'side_cam'
 
+                success = False
                 if cam_name in colors and colors[cam_name] and 'path' in colors[cam_name]:
                     img_path = os.path.join(episode_dir, colors[cam_name]['path'])
-                    img = load_and_resize_image_robust(img_path, image_size)
-                else:
-                    img = np.full((image_size[0], image_size[1], 3), 128, dtype=np.uint8)
+                    success, img = load_and_resize_image_robust(img_path, image_size)
 
-                image_arrays[act_cam_name].append(img)
+                if success:
+                    image_arrays[act_cam_name].append(img)
 
         except Exception as e:
             print(f"     ⚠️  Error processing step {i}: {e}")
