@@ -19,7 +19,7 @@ lighting_augmentation:
 # 相机角度增强配置（旋转）
 rotation_augmentation:
   # 是否启用旋转增强 (设为false可快速禁用)
-  enabled: true
+  enabled: false
 
   # 旋转角度范围（单位：度）
   max_rotation_degrees: 5.0  # 随机旋转 ±5度
