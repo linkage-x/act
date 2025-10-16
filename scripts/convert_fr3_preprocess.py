@@ -30,7 +30,7 @@ def load_and_resize_image_robust(image_path, target_size=(480, 640), fallback_co
         if img.shape[:2] != target_size:
             img = cv2.resize(img, (target_size[1], target_size[0]))
 
-        return img
+        return True, img
     except Exception as e:
         print(f"    ⚠️  Exception loading {image_path}: {e}")
         # Create a fallback image
