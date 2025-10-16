@@ -12,7 +12,7 @@ training:
   temporal_agg: false
 
   # ACT特定超参数
-  kl_weight: 10
+  kl_weight: 1
   chunk_size: 100
   hidden_dim: 512
   dim_feedforward: 3200
