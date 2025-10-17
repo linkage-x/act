@@ -467,7 +467,11 @@ def convert_episode_preprocessing(episode_dir, output_dir, episode_name,
         print(f"   ❌ No data points found in {episode_name}")
         return 0
 
-    print(f"   📊 Original length: {len(data_points)} steps")
+    epilen = len(data_points)
+    print(f"   📊 Original length: {epilen} steps")
+    if epilen < 200 or epilen > 1000:
+        print(f"   ⚠️  Warning: Unusual episode length ({epilen} steps), PASS...")
+        return 0
 
     # Step 1: Remove static frames if requested
     if remove_static:

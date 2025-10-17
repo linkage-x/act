@@ -19,6 +19,6 @@ data:
 
 training:
   # FR3任务的推荐训练参数
-  batch_size: 512
+  batch_size: 64
   num_epochs: 8000
   lr: 5e-5
