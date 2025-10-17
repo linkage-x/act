@@ -15,6 +15,6 @@ data:
 
 training:
   ckpt_dir: ckpts/fr3_pp_1017_491ep
-  batch_size: 256
+  batch_size: 64
   num_epochs: 8000
   lr: 5e-5
