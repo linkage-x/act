@@ -1,0 +1,32 @@
+# UMI → HDF5 Conversion (EE absolute pose → relative to first frame)
+# Usage:
+#   python dependencies/act/dataset/hdf5_loader.py --config dependencies/act/dataset/umi_convert.yaml
+
+# Source UMI episodes (each has data.json, colors/, etc.)
+task_dir: "/boot/common_data/2025/umi_data/single/1024_left_fr3_pick_n_place_humanhand_82eps"
+
+# Output directory for generated HDF5 files
+output_dir: "/boot/common_data/2025/umi_data_hdf5/single/1024_left_fr3_pick_n_place_humanhand_82eps"
+
+# Train/obs types (UMI uses ee→ee)
+action_type: "end_effector_pose"
+obs_type: "end_effector_pose"
+
+# Camera name prefixes (match *_color in UMI JSON)
+camera_names:
+  - "left_hand"
+  - "left_hand_fisheye"
+
+# Sampling and images
+skip_steps_nums: 1
+image_size: [480, 640]
+store_ee_pose: true
+
+# UMI mode: store EE pose relative to the first valid frame
+umi_mode: true
+
+# Metadata and optional episode-length filters
+is_sim: false
+# min_episode_len: 50
+# max_episode_len: 10000
+

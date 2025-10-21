@@ -5,7 +5,7 @@ training:
   # 基础训练参数
   policy_class: ACT
   batch_size: 64
-  num_epochs: 2000
+  num_epochs: 8000
   lr: 5e-5
   seed: 0
   onscreen_render: false

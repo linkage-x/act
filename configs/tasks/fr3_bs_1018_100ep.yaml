@@ -1,0 +1,19 @@
+# FR3 Block Stacking 2024-09-16 50 Episodes (Downsampled)
+# 对应 constants.py 中的 fr3_bs_0916_50ep_ds 配置
+
+extends: base/fr3
+
+task:
+  name: fr3_bs_1018_100ep
+
+data:
+  dataset_dirs:
+    - /home/hanyu/Data_Collection/1018_block_stacking_fr3_3Dmosue_110eps_hdf5
+  episode_len: 600  # 经过预处理优化的长度
+  num_episodes: 100
+
+training:
+  ckpt_dir: ckpts/fr3_bs_1018_100ep
+  batch_size: 16
+  num_epochs: 8000
+  lr: 2e-5

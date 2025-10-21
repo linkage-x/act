@@ -11,7 +11,7 @@ import IPython
 e = IPython.embed
 
 class EpisodicDataset(torch.utils.data.Dataset):
-    def __init__(self, episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len, augmentation_config=None):
+    def __init__(self, episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len, augmentation_config=None, control_mode='joint'):
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
         self.episode_id_to_dir = episode_id_to_dir
@@ -19,6 +19,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.norm_stats = norm_stats
         self.episode_len = episode_len
         self.is_sim = None
+        self.control_mode = control_mode  # 'joint' or 'ee_pose'
 
         # 初始化数据增强（传递camera_names以支持相机特定的增强）
         if augmentation_config is not None:
@@ -89,36 +90,59 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # get observation at start_ts only
             qpos = root['/observations/qpos'][start_ts]
             qvel = root['/observations/qvel'][start_ts]
+
+            # Load EE pose if using EE pose control mode
+            ee_pose = None
+            if self.control_mode == 'ee_pose' and '/observations/ee_pose' in root:
+                ee_pose = root['/observations/ee_pose'][start_ts]
+
             image_dict = dict()
             for cam_name in self.camera_names:
                 image_dict[cam_name] = root[f'/observations/images/{cam_name}'][start_ts]
+
             # get all actions after and including start_ts
             if is_sim:
                 action = root['/action'][start_ts:]
                 action_len = episode_len - start_ts
+
+                # Load EE pose actions if available
+                ee_action = None
+                if self.control_mode == 'ee_pose' and '/ee_action' in root:
+                    ee_action = root['/ee_action'][start_ts:]
             else:
                 action = root['/action'][max(0, start_ts - 1):] # hack, to make timesteps more aligned
                 action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
+
+                # Load EE pose actions if available
+                ee_action = None
+                if self.control_mode == 'ee_pose' and '/ee_action' in root:
+                    ee_action = root['/ee_action'][max(0, start_ts - 1):]
 
         self.is_sim = is_sim
         
         # Use episode_len for padding
         target_len = self.episode_len
-        
-        padded_action = np.zeros((target_len, original_action_shape[1]), dtype=np.float32)
+
+        # Choose action data based on control mode
+        if self.control_mode == 'ee_pose' and ee_action is not None:
+            action_to_use = ee_action
+        else:
+            action_to_use = action
+
+        padded_action = np.zeros((target_len, action_to_use.shape[1] if len(action_to_use.shape) > 1 else original_action_shape[1]), dtype=np.float32)
         actual_action_len = min(action_len, target_len)
-        
+
         # Fill the padded_action array with available actions
         if actual_action_len > 0:
-            padded_action[:actual_action_len] = action[:actual_action_len]
-            
+            padded_action[:actual_action_len] = action_to_use[:actual_action_len]
+
             # If input data is insufficient, pad with the last frame data
             if action_len < target_len and action_len > 0:
-                last_frame = action[-1]  # Get the last frame
+                last_frame = action_to_use[-1]  # Get the last frame
                 # Repeat the last frame for the remaining timesteps
                 for i in range(action_len, target_len):
                     padded_action[i] = last_frame
-        
+
         # Set padding mask: 1 for padded timesteps (beyond original data), 0 for real actions
         is_pad = np.zeros(target_len)
         if action_len < target_len:
@@ -132,7 +156,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
         # construct observations
         image_data = torch.from_numpy(all_cam_images)
-        qpos_data = torch.from_numpy(qpos).float()
+
+        # Use EE pose or joint positions based on control mode
+        if self.control_mode == 'ee_pose' and ee_pose is not None:
+            qpos_data = torch.from_numpy(ee_pose).float()
+        else:
+            qpos_data = torch.from_numpy(qpos).float()
+
         action_data = torch.from_numpy(padded_action).float()
         is_pad = torch.from_numpy(is_pad).bool()
 
@@ -146,15 +176,24 @@ class EpisodicDataset(torch.utils.data.Dataset):
         if self.augmentation_fn is not None:
             image_data = self.augmentation_fn(image_data)
 
-        action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
-        qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
+        # Normalize actions and qpos based on control mode
+        if self.control_mode == 'ee_pose':
+            action_data = (action_data - self.norm_stats["ee_action_mean"]) / self.norm_stats["ee_action_std"]
+            qpos_data = (qpos_data - self.norm_stats["ee_pose_mean"]) / self.norm_stats["ee_pose_std"]
+        else:
+            action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
+            qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
 
         return image_data, qpos_data, action_data, is_pad
 
 
-def get_norm_stats(dataset_dirs, episode_id_to_dir, episode_ids):
+def get_norm_stats(dataset_dirs, episode_id_to_dir, episode_ids, control_mode='joint'):
     all_qpos_data = []
     all_action_data = []
+    all_ee_pose_data = []
+    all_ee_action_data = []
+
+    has_ee_pose = False
 
     for episode_id in episode_ids:
         dir_path, local_episode_id = episode_id_to_dir[episode_id]
@@ -164,11 +203,21 @@ def get_norm_stats(dataset_dirs, episode_id_to_dir, episode_ids):
                 qpos = root['/observations/qpos'][()]
                 qvel = root['/observations/qvel'][()]
                 action = root['/action'][()]
+
+                # Check if EE pose data is available
+                if '/observations/ee_pose' in root and '/ee_action' in root:
+                    has_ee_pose = True
+                    ee_pose = root['/observations/ee_pose'][()]
+                    ee_action = root['/ee_action'][()]
+                    all_ee_pose_data.append(torch.from_numpy(ee_pose))
+                    all_ee_action_data.append(torch.from_numpy(ee_action))
+
             all_qpos_data.append(torch.from_numpy(qpos))
             all_action_data.append(torch.from_numpy(action))
         except Exception as e:
             print(f"Skipping {dataset_path} due to error: {e}")
             continue
+
     # Concatenate all data instead of stacking (episodes have different lengths)
     all_qpos_data = torch.cat(all_qpos_data, dim=0)
     all_action_data = torch.cat(all_action_data, dim=0)
@@ -187,17 +236,39 @@ def get_norm_stats(dataset_dirs, episode_id_to_dir, episode_ids):
              "qpos_mean": qpos_mean.numpy().squeeze(), "qpos_std": qpos_std.numpy().squeeze(),
              "example_qpos": qpos}
 
+    # Compute EE pose normalization stats if available
+    if has_ee_pose and len(all_ee_pose_data) > 0:
+        all_ee_pose_data = torch.cat(all_ee_pose_data, dim=0)
+        all_ee_action_data = torch.cat(all_ee_action_data, dim=0)
+
+        ee_pose_mean = all_ee_pose_data.mean(dim=0, keepdim=True)
+        ee_pose_std = all_ee_pose_data.std(dim=0, keepdim=True)
+        ee_pose_std = torch.clip(ee_pose_std, 1e-2, np.inf)
+
+        ee_action_mean = all_ee_action_data.mean(dim=0, keepdim=True)
+        ee_action_std = all_ee_action_data.std(dim=0, keepdim=True)
+        ee_action_std = torch.clip(ee_action_std, 1e-2, np.inf)
+
+        stats["ee_pose_mean"] = ee_pose_mean.numpy().squeeze()
+        stats["ee_pose_std"] = ee_pose_std.numpy().squeeze()
+        stats["ee_action_mean"] = ee_action_mean.numpy().squeeze()
+        stats["ee_action_std"] = ee_action_std.numpy().squeeze()
+        stats["has_ee_pose"] = True
+    else:
+        stats["has_ee_pose"] = False
+
     return stats
 
 
-def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len=None, augmentation_config=None):
+def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len=None, augmentation_config=None, control_mode='joint'):
     # Support both single directory (string) and multiple directories (list)
     if isinstance(dataset_dir, str):
         dataset_dirs = [dataset_dir]
     else:
         dataset_dirs = dataset_dir
 
-    print(f'\nData from: {dataset_dirs}\n')
+    print(f'\nData from: {dataset_dirs}')
+    print(f'Control mode: {control_mode}\n')
 
     # Get list of available episode files and extract episode IDs from all directories
     import glob
@@ -271,7 +342,13 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
     val_episode_ids = [available_episode_ids[i] for i in shuffled_indices[int(train_ratio * actual_num_episodes):]]
 
     # obtain normalization stats for qpos and action
-    norm_stats = get_norm_stats(dataset_dirs, episode_id_to_dir, available_episode_ids)
+    norm_stats = get_norm_stats(dataset_dirs, episode_id_to_dir, available_episode_ids, control_mode)
+
+    # Validate control mode availability
+    if control_mode == 'ee_pose' and not norm_stats.get('has_ee_pose', False):
+        print("WARNING: EE pose control mode requested but no EE pose data found in dataset!")
+        print("Falling back to joint control mode.")
+        control_mode = 'joint'
 
     # If episode_len not provided, use the maximum episode length found
     if episode_len is None:
@@ -279,10 +356,11 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
 
     # construct dataset and dataloader
     # 注意：需要将camera_names传递给augmentation pipeline以支持相机特定的增强
-    train_dataset = EpisodicDataset(train_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len, augmentation_config)
-    val_dataset = EpisodicDataset(val_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len)  # 验证集不使用增强
+    train_dataset = EpisodicDataset(train_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len, augmentation_config, control_mode)
+    val_dataset = EpisodicDataset(val_episode_ids, episode_id_to_dir, camera_names, norm_stats, episode_len, control_mode=control_mode)  # 验证集不使用增强
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size_train, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1)
+    # Validation should be deterministic for stable metrics
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size_val, shuffle=False, pin_memory=True, num_workers=1, prefetch_factor=1)
 
     return train_dataloader, val_dataloader, norm_stats, train_dataset.is_sim
 

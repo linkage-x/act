@@ -72,42 +72,88 @@ class PolicyInference(ABC):
         pass
         
     def normalize_data(self, data, stats, key):
-        """数据归一化"""
+        """数据归一化
+        支持 stats 中为 torch.Tensor 或 numpy.ndarray，两者与 data 类型对齐
+        """
         mean = stats[f'{key}_mean']
         std = stats[f'{key}_std']
+        # Align types with input data (numpy path)
+        if isinstance(data, np.ndarray):
+            if hasattr(mean, 'detach'):
+                mean = mean.detach().cpu().numpy()
+            if hasattr(std, 'detach'):
+                std = std.detach().cpu().numpy()
+            return (data - mean) / std
+        # Torch path
+        if not isinstance(data, torch.Tensor):
+            data = torch.as_tensor(data)
+        if not isinstance(mean, torch.Tensor):
+            mean = torch.as_tensor(mean)
+        if not isinstance(std, torch.Tensor):
+            std = torch.as_tensor(std)
         return (data - mean) / std
         
     def denormalize_data(self, data, stats, key):
-        """数据反归一化"""
+        """数据反归一化
+        支持 stats 中为 torch.Tensor 或 numpy.ndarray，两者与 data 类型对齐
+        """
         mean = stats[f'{key}_mean']
         std = stats[f'{key}_std']
+        # Align types with input data
+        if isinstance(data, np.ndarray):
+            if hasattr(mean, 'detach'):
+                mean = mean.detach().cpu().numpy()
+            if hasattr(std, 'detach'):
+                std = std.detach().cpu().numpy()
+            return data * std + mean
+        # Torch path
+        if not isinstance(data, torch.Tensor):
+            data = torch.as_tensor(data)
+        if not isinstance(mean, torch.Tensor):
+            mean = torch.as_tensor(mean)
+        if not isinstance(std, torch.Tensor):
+            std = torch.as_tensor(std)
         return data * std + mean
         
     def predict(self, state, images):
         """
         进行动作预测
-        
+
         Args:
             state: 状态向量
             images: 图像数据
-            
+
         Returns:
             predicted_actions: 预测的动作序列
         """
         with torch.no_grad():
             # 预处理状态
             state = np.array(state)
-            state_normalized = self.normalize_data(state, self.dataset_stats, 'qpos')
+
+            # 🔥 关键修复: 根据控制模式选择正确的归一化键
+            # 检查是否为EE pose控制模式
+            if self.dataset_stats.get('has_ee_pose', False):
+                # EE控制模式: 使用ee_pose统计信息
+                state_key = 'ee_pose'
+                action_key = 'ee_action'
+                print(f"🎯 Using EE pose control mode for normalization")
+            else:
+                # 关节控制模式: 使用qpos统计信息
+                state_key = 'qpos'
+                action_key = 'action'
+                print(f"🎯 Using joint control mode for normalization")
+
+            state_normalized = self.normalize_data(state, self.dataset_stats, state_key)
             state_tensor = torch.from_numpy(state_normalized).float().to(self.device)
             state_tensor = state_tensor.unsqueeze(0)  # 添加batch维度
-            
+
             # 策略推理
             actions = self.forward_policy(state_tensor, images)
-            
-            # 反归一化动作
+
+            # 反归一化动作 - 使用对应的action key
             actions_np = actions.cpu().numpy().squeeze(0)  # 移除batch维度
-            actions_denorm = self.denormalize_data(actions_np, self.dataset_stats, 'action')
-            
+            actions_denorm = self.denormalize_data(actions_np, self.dataset_stats, action_key)
+
             return actions_denorm
 
 

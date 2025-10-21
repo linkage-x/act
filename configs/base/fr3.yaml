@@ -15,7 +15,7 @@ data:
     - side_cam
 
   # FR3任务的常用episode长度
-  episode_len: 800
+  episode_len: 600
 
 training:
   # FR3任务的推荐训练参数

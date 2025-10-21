@@ -11,20 +11,29 @@ from tqdm import tqdm
 from einops import rearrange
 import yaml
 
-from constants import DT
-from constants import PUPPET_GRIPPER_JOINT_OPEN
-from utils import load_data # data functions
-from utils import sample_box_pose, sample_insertion_pose # robot functions
+# from constants import DT
+# from constants import PUPPET_GRIPPER_JOINT_OPEN
+# from utils import load_data # data functions  # DEPRECATED: Use HDF5Loader instead
+# from utils import sample_box_pose, sample_insertion_pose # robot functions
 from utils import compute_dict_mean, set_seed, detach_dict # helper functions
 from policy import ACTPolicy, CNNMLPPolicy
-from visualize_episodes import save_videos
+# from visualize_episodes import save_videos
 
-from sim_env import BOX_POSE
-import IPython
-e = IPython.embed
+# Import new HDF5Loader
+from dataset.hdf5_loader import HDF5Loader
+from dataset.reader import ActionType, ObservationType
+
+# from sim_env import BOX_POSE
+import re
 
 def main(args):
-    set_seed(1)
+
+    # Device configuration
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"🖥️  Using device: {device}")
+    if device.type == 'cuda':
+        print(f"   GPU: {torch.cuda.get_device_name(0)}")
+    print()
 
     # 打印关键参数确认
     print("🚀 开始训练进程...")
@@ -36,8 +45,6 @@ def main(args):
     print(f"📈 学习率: {args['lr']:.6f}")
     print()
 
-    # command line parameters
-    is_eval = args['eval']
     ckpt_dir = args['ckpt_dir']
     policy_class = args['policy_class']
     onscreen_render = args['onscreen_render']
@@ -46,14 +53,14 @@ def main(args):
     batch_size_val = args['batch_size']
     num_epochs = args['num_epochs']
 
-    # get task parameters
+    # get task parameters from YAML only (no SIM_TASK_CONFIGS fallback)
     is_sim = task_name[:4] == 'sim_' or task_name.startswith('fr3_') or task_name.startswith('monte01_')
-    if is_sim:
-        from constants import SIM_TASK_CONFIGS
-        task_config = SIM_TASK_CONFIGS[task_name]
-    else:
-        from aloha_scripts.constants import TASK_CONFIGS
-        task_config = TASK_CONFIGS[task_name]
+    task_config = args.get('_task_config')
+    if task_config is None:
+        raise KeyError(
+            f"Task config not provided for task '{task_name}'. "
+            f"Ensure you load YAML via task_config_manager and pass it to main (args['_task_config'])."
+        )
     dataset_dir = task_config['dataset_dir']
     num_episodes = task_config.get('num_episodes', None)  # Optional, auto-detect if not specified
     episode_len = task_config['episode_len']
@@ -61,6 +68,35 @@ def main(args):
 
     # get state dimension from task config or default to 14
     state_dim = task_config.get('state_dim', 14)
+
+    # Derive obs->action pair from ckpt_dir suffix, e.g., *_ee2ee, *_q2q
+    # Supported keys: 'ee' (end-effector pose), 'q' (joint position)
+    pair_match = re.search(r'(ee|q)2(ee|q)(?![a-zA-Z0-9])', ckpt_dir)
+    if pair_match:
+        obs_key, act_key = pair_match.group(1), pair_match.group(2)
+    else:
+        # Default to joint->joint if no suffix specified
+        obs_key, act_key = 'q', 'q'
+
+    # Map to enums
+    obs_type_from_suffix = ObservationType.END_EFFECTOR_POSE if obs_key == 'ee' else ObservationType.JOINT_POSITION_ONLY
+    action_type_from_suffix = ActionType.END_EFFECTOR_POSE if act_key == 'ee' else ActionType.JOINT_POSITION
+
+    # Control mode controls how dataset constructs (obs, action)
+    if obs_key == 'ee' and act_key == 'ee':
+        # EE pose: [x, y, z, qx, qy, qz, qw, gripper] = 8 dimensions
+        state_dim = 8
+        print(f"Using ee2ee mode inferred from ckpt_dir, state_dim set to {state_dim}")
+    elif obs_key == 'q' and act_key == 'q':
+        # Joint position mode: use state_dim from task config (default: 8 for FR3)
+        # state_dim already set from task_config above (line 70)
+        print(f"Using q2q (joint position) mode inferred from ckpt_dir, state_dim = {state_dim}")
+    else:
+        # Mixed modes (ee2q or q2ee) require dataset/model changes; guard for now
+        raise NotImplementedError(
+            f"Requested mixed mode '{obs_key}2{act_key}' inferred from ckpt_dir is not supported yet."
+        )
+
     lr_backbone = 1e-5
     backbone = 'resnet18'
     if policy_class == 'ACT':
@@ -99,20 +135,10 @@ def main(args):
         'seed': args['seed'],
         'temporal_agg': args['temporal_agg'],
         'camera_names': camera_names,
-        'real_robot': not is_sim
+        'real_robot': not is_sim,
+        'device': device,
+        'stats': None  # Will be filled after data loading
     }
-
-    if is_eval:
-        ckpt_names = [f'policy_best.ckpt']
-        results = []
-        for ckpt_name in ckpt_names:
-            success_rate, avg_return = eval_bc(config, ckpt_name, save_episode=True)
-            results.append([ckpt_name, success_rate, avg_return])
-
-        for ckpt_name, success_rate, avg_return in results:
-            print(f'{ckpt_name}: {success_rate=} {avg_return=}')
-        print()
-        exit()
 
     # 加载光照增强配置
     augmentation_config = None
@@ -124,7 +150,31 @@ def main(args):
     else:
         print(f"⚠️  光照增强配置文件不存在: {lighting_config_path}")
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val, episode_len, augmentation_config)
+    # Create HDF5 data loader with control mode support
+    # Determine action type and observation type from control mode
+    action_type = action_type_from_suffix
+    observation_type = obs_type_from_suffix
+
+    hdf5_loader_config = {
+        'num_episodes': num_episodes,
+        'camera_names': camera_names,
+        'batch_size_train': batch_size_train,
+        'batch_size_val': batch_size_val,
+        'episode_len': episode_len,
+        'augmentation_config': augmentation_config,
+    }
+
+    hdf5_loader = HDF5Loader(
+        config=hdf5_loader_config,
+        dataset_dir=dataset_dir,
+        action_type=action_type,
+        observation_type=observation_type
+    )
+
+    train_dataloader, val_dataloader, stats, _ = hdf5_loader.create_dataloaders()
+
+    # Add stats to config for eval
+    config['stats'] = stats
 
     # save dataset stats
     if not os.path.isdir(ckpt_dir):
@@ -162,185 +212,28 @@ def make_optimizer(policy_class, policy):
     return optimizer
 
 
-def get_image(ts, camera_names):
-    curr_images = []
+def get_image(ts, camera_names, device):
+    """
+    Get images from observation and return as dict for policy inference
+
+    Returns:
+        dict: {cam_name: torch.Tensor (C, H, W)} on specified device
+    """
+    image_dict = {}
     for cam_name in camera_names:
         curr_image = rearrange(ts.observation['images'][cam_name], 'h w c -> c h w')
-        curr_images.append(curr_image)
-    curr_image = np.stack(curr_images, axis=0)
-    curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
-    return curr_image
+        # Normalize to [0, 1] and convert to torch tensor
+        curr_image = torch.from_numpy(curr_image / 255.0).float().to(device)
+        image_dict[cam_name] = curr_image
+    return image_dict
 
-
-def eval_bc(config, ckpt_name, save_episode=True):
-    set_seed(1000)
-    ckpt_dir = config['ckpt_dir']
-    state_dim = config['state_dim']
-    real_robot = config['real_robot']
-    policy_class = config['policy_class']
-    onscreen_render = config['onscreen_render']
-    policy_config = config['policy_config']
-    camera_names = config['camera_names']
-    max_timesteps = config['episode_len']
-    task_name = config['task_name']
-    temporal_agg = config['temporal_agg']
-    onscreen_cam = 'angle'
-
-    # load policy and stats
-    ckpt_path = os.path.join(ckpt_dir, ckpt_name)
-    policy = make_policy(policy_class, policy_config)
-    loading_status = policy.load_state_dict(torch.load(ckpt_path))
-    print(loading_status)
-    policy.cuda()
-    policy.eval()
-    print(f'Loaded: {ckpt_path}')
-    stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
-    with open(stats_path, 'rb') as f:
-        stats = pickle.load(f)
-
-    pre_process = lambda s_qpos: (s_qpos - stats['qpos_mean']) / stats['qpos_std']
-    post_process = lambda a: a * stats['action_std'] + stats['action_mean']
-
-    # load environment
-    if real_robot:
-        from aloha_scripts.robot_utils import move_grippers # requires aloha
-        from aloha_scripts.real_env import make_real_env # requires aloha
-        env = make_real_env(init_node=True)
-        env_max_reward = 0
-    else:
-        from sim_env import make_sim_env
-        env = make_sim_env(task_name)
-        env_max_reward = env.task.max_reward
-
-    query_frequency = policy_config['num_queries']
-    if temporal_agg:
-        query_frequency = 1
-        num_queries = policy_config['num_queries']
-
-    max_timesteps = int(max_timesteps * 1) # may increase for real-world tasks
-
-    num_rollouts = 50
-    episode_returns = []
-    highest_rewards = []
-    for rollout_id in range(num_rollouts):
-        rollout_id += 0
-        ### set task
-        if 'sim_transfer_cube' in task_name:
-            BOX_POSE[0] = sample_box_pose() # used in sim reset
-        elif 'sim_insertion' in task_name:
-            BOX_POSE[0] = np.concatenate(sample_insertion_pose()) # used in sim reset
-
-        ts = env.reset()
-
-        ### onscreen render
-        if onscreen_render:
-            ax = plt.subplot()
-            plt_img = ax.imshow(env._physics.render(height=480, width=640, camera_id=onscreen_cam))
-            plt.ion()
-
-        ### evaluation loop
-        if temporal_agg:
-            all_time_actions = torch.zeros([max_timesteps, max_timesteps+num_queries, state_dim]).cuda()
-
-        qpos_history = torch.zeros((1, max_timesteps, state_dim)).cuda()
-        image_list = [] # for visualization
-        qpos_list = []
-        target_qpos_list = []
-        rewards = []
-        with torch.inference_mode():
-            for t in range(max_timesteps):
-                ### update onscreen render and wait for DT
-                if onscreen_render:
-                    image = env._physics.render(height=480, width=640, camera_id=onscreen_cam)
-                    plt_img.set_data(image)
-                    plt.pause(DT)
-
-                ### process previous timestep to get qpos and image_list
-                obs = ts.observation
-                if 'images' in obs:
-                    image_list.append(obs['images'])
-                else:
-                    image_list.append({'main': obs['image']})
-                qpos_numpy = np.array(obs['qpos'])
-                qpos = pre_process(qpos_numpy)
-                qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
-                qpos_history[:, t] = qpos
-                curr_image = get_image(ts, camera_names)
-
-                ### query policy
-                if config['policy_class'] == "ACT":
-                    if t % query_frequency == 0:
-                        all_actions = policy(qpos, curr_image)
-                    if temporal_agg:
-                        all_time_actions[[t], t:t+num_queries] = all_actions
-                        actions_for_curr_step = all_time_actions[:, t]
-                        actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
-                        actions_for_curr_step = actions_for_curr_step[actions_populated]
-                        k = 0.01
-                        exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
-                        exp_weights = exp_weights / exp_weights.sum()
-                        exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
-                        raw_action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
-                    else:
-                        raw_action = all_actions[:, t % query_frequency]
-                elif config['policy_class'] == "CNNMLP":
-                    raw_action = policy(qpos, curr_image)
-                else:
-                    raise NotImplementedError
-
-                ### post-process actions
-                raw_action = raw_action.squeeze(0).cpu().numpy()
-                action = post_process(raw_action)
-                target_qpos = action
-
-                ### step the environment
-                ts = env.step(target_qpos)
-
-                ### for visualization
-                qpos_list.append(qpos_numpy)
-                target_qpos_list.append(target_qpos)
-                rewards.append(ts.reward)
-
-            plt.close()
-        if real_robot:
-            move_grippers([env.puppet_bot_left, env.puppet_bot_right], [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)  # open
-            pass
-
-        rewards = np.array(rewards)
-        episode_return = np.sum(rewards[rewards!=None])
-        episode_returns.append(episode_return)
-        episode_highest_reward = np.max(rewards)
-        highest_rewards.append(episode_highest_reward)
-        print(f'Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, {env_max_reward=}, Success: {episode_highest_reward==env_max_reward}')
-
-        if save_episode:
-            save_videos(image_list, DT, video_path=os.path.join(ckpt_dir, f'video{rollout_id}.mp4'))
-
-    success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
-    avg_return = np.mean(episode_returns)
-    summary_str = f'\nSuccess rate: {success_rate}\nAverage return: {avg_return}\n\n'
-    for r in range(env_max_reward+1):
-        more_or_equal_r = (np.array(highest_rewards) >= r).sum()
-        more_or_equal_r_rate = more_or_equal_r / num_rollouts
-        summary_str += f'Reward >= {r}: {more_or_equal_r}/{num_rollouts} = {more_or_equal_r_rate*100}%\n'
-
-    print(summary_str)
-
-    # save success rate to txt
-    result_file_name = 'result_' + ckpt_name.split('.')[0] + '.txt'
-    with open(os.path.join(ckpt_dir, result_file_name), 'w') as f:
-        f.write(summary_str)
-        f.write(repr(episode_returns))
-        f.write('\n\n')
-        f.write(repr(highest_rewards))
-
-    return success_rate, avg_return
-
-
-def forward_pass(data, policy):
+def forward_pass(data, policy, device):
     image_data, qpos_data, action_data, is_pad = data
-    image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
-    return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
+    image_data = image_data.to(device)
+    qpos_data = qpos_data.to(device)
+    action_data = action_data.to(device)
+    is_pad = is_pad.to(device)
+    return policy(qpos_data, image_data, action_data, is_pad)
 
 
 def train_bc(train_dataloader, val_dataloader, config):
@@ -349,12 +242,13 @@ def train_bc(train_dataloader, val_dataloader, config):
     seed = config['seed']
     policy_class = config['policy_class']
     policy_config = config['policy_config']
+    device = config['device']
 
     set_seed(seed)
 
     print("🏗️  初始化模型和优化器...")
     policy = make_policy(policy_class, policy_config)
-    policy.cuda()
+    policy.to(device)
     optimizer = make_optimizer(policy_class, policy)
 
     # 打印模型和优化器信息
@@ -391,7 +285,7 @@ def train_bc(train_dataloader, val_dataloader, config):
             policy.eval()
             epoch_dicts = []
             for batch_idx, data in enumerate(val_dataloader):
-                forward_dict = forward_pass(data, policy)
+                forward_dict = forward_pass(data, policy, device)
                 epoch_dicts.append(forward_dict)
             epoch_summary = compute_dict_mean(epoch_dicts)
             validation_history.append(epoch_summary)
@@ -409,15 +303,18 @@ def train_bc(train_dataloader, val_dataloader, config):
         # training
         policy.train()
         optimizer.zero_grad()
+        train_epoch_dicts = []  # Per-epoch accumulator
         for batch_idx, data in enumerate(train_dataloader):
-            forward_dict = forward_pass(data, policy)
+            forward_dict = forward_pass(data, policy, device)
             # backward
             loss = forward_dict['loss']
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
-        epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
+            train_epoch_dicts.append(detach_dict(forward_dict))
+        # Compute epoch summary from this epoch's batches
+        epoch_summary = compute_dict_mean(train_epoch_dicts)
         epoch_train_loss = epoch_summary['loss']
         print(f'Train loss: {epoch_train_loss:.5f}')
         summary_string = ''
@@ -458,6 +355,7 @@ def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
         plt.legend()
         plt.title(key)
         plt.savefig(plot_path)
+        plt.close()  # 释放内存，防止内存泄漏
     print(f'Saved plots to {ckpt_dir}')
 
 
@@ -465,21 +363,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='ACT训练脚本 - 使用配置文件管理参数')
     parser.add_argument('--config', type=str, required=True,
                        help='配置文件路径 (例如: configs/tasks/fr3_bs_0916_50ep_ds.yaml)')
-    parser.add_argument('--eval', action='store_true',
-                       help='评估模式')
 
     args = parser.parse_args()
 
     # 加载配置
     try:
         from task_config_manager import load_task_config
-        config_data = load_task_config(args.config, eval_mode=args.eval)
+        config_data = load_task_config(args.config, eval_mode=False)
 
         print(f"✓ 配置文件加载成功: {args.config}")
         print(f"  任务名: {config_data['args']['task_name']}")
         print(f"  机器人: {config_data['config']['robot']['name']}")
         print(f"  数据集: {config_data['task_config']['dataset_dir']}")
-        print(f"  模式: {'评估' if args.eval else '训练'}")
+        print(f"  模式: 训练")
         print()
 
         # 详细打印训练超参数
@@ -521,13 +417,10 @@ if __name__ == '__main__':
         print("=" * 60)
         print()
 
-        # 将task_config注入到constants模块，以便兼容旧代码
-        from constants import SIM_TASK_CONFIGS
-        task_name = config_data['args']['task_name']
-        SIM_TASK_CONFIGS[task_name] = config_data['task_config']
-
-        # 运行主函数
-        main(config_data['args'])
+        # 运行主函数（统一从 YAML 注入任务配置）
+        args_data = config_data['args']
+        args_data['_task_config'] = config_data['task_config']
+        main(args_data)
 
     except Exception as e:
         print(f"❌ 配置加载失败: {e}")

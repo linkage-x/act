@@ -1,0 +1,53 @@
+# HDF5 Loader Configuration for ACT
+
+# Task directory (for convert mode: source directory with raw episodes)
+task_dir: "/boot/common_data/2025/fr3/1022_insert_tube_fr3_pika_51eps"
+
+# Output directory (for convert mode: where to save HDF5 files)
+output_dir: "/boot/common_data/2025/fr3_hdf5/1022_insert_tube_fr3_pika_51eps_hdf5"
+
+# Action type: "joint_position" or "end_effector_pose"
+action_type: "joint_position"
+
+# Observation type: "joint_position_only" or "end_effector_pose"
+obs_type: "joint_position_only"
+
+# Skip steps for downsampling (1 = no skip, 2 = every 2nd frame, etc.)
+skip_steps_nums: 2
+
+# Camera names
+camera_names:
+  - "ee_cam"
+  - "third_person_cam"
+  - "side_cam"
+
+# Image size [height, width]
+image_size:
+  - 480
+  - 640
+
+# Store end-effector pose data during conversion
+store_ee_pose: true
+
+# Whether the data is from simulation (default: false for real robot data)
+is_sim: false
+
+# Episode length filtering (episodes outside this range will be skipped during conversion)
+# Set to null to disable filtering
+min_episode_len: 200
+max_episode_len: 1000
+
+# Batch size for training
+batch_size_train: 32
+
+# Batch size for validation
+batch_size_val: 32
+
+# Maximum episode length
+episode_len: 500
+
+# Number of episodes to use (null = use all)
+num_episodes: null
+
+# Data augmentation configuration (optional)
+augmentation_config: null
