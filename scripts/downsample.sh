@@ -4,7 +4,7 @@ set -e  # 遇到错误立即退出
 
 # 默认配置
 DEFAULT_BASE_DIR='/boot/common_data/2025/fr3'
-SCRIPT_NAME='convert_fr3_preprocess.py'
+SCRIPT_NAME='scripts/convert_fr3_preprocess.py'
 
 # 参数检查
 if [ $# -lt 1 ]; then
