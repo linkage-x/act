@@ -40,7 +40,7 @@ fi
 
 # 创建输出目录
 sudo mkdir -p "$OUTPUT_DIR"
-sudo chown -R $user:$user "$OUTPUT_DIR"
+sudo chown -R $USER:$USER "$OUTPUT_DIR"
 
 # 运行预处理
 echo "🚀 执行数据下采样..."
