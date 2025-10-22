@@ -4,16 +4,17 @@
 extends: base/fr3
 
 task:
-  name: fr3_it_1013_50ep
+  name: fr3_it_1022_180ep
 
 data:
   dataset_dirs:
     - /boot/common_data/2025/fr3/1013_inserttube_fr3_pika_50ep_ds_hdf5
-  episode_len: 450  # 经过预处理优化的长度
-  num_episodes: 50
+    - /boot/common_data/2025/fr3/1021_insert_tube_fr3_pika_150eps_hdf5
+  episode_len: 400  # 经过预处理优化的长度
+  num_episodes: 180
 
 training:
-  ckpt_dir: ckpts/fr3_it_1013_50ep
+  ckpt_dir: ckpts/fr3_it_1022_180ep
   batch_size: 64
   num_epochs: 8000
   lr: 5e-5
