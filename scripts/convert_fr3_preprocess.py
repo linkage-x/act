@@ -564,7 +564,7 @@ def convert_segment_to_hdf5(data_points, episode_dir, output_path, image_size=(4
 
             # Actions (use next state as action, or current for last step)
             if i < episode_len - 1:
-                next_point = data_points[i + 1]
+                next_point = data_points[i + 1] # TODO: use action from data.json
                 next_joint_states = next_point.get('joint_states', {})
                 if 'single' in next_joint_states:
                     next_positions = next_joint_states['single'].get('position', positions)
