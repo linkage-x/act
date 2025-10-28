@@ -11,19 +11,13 @@ from tqdm import tqdm
 from einops import rearrange
 import yaml
 
-# from constants import DT
-# from constants import PUPPET_GRIPPER_JOINT_OPEN
-# from utils import load_data # data functions  # DEPRECATED: Use HDF5Loader instead
-# from utils import sample_box_pose, sample_insertion_pose # robot functions
 from utils import compute_dict_mean, set_seed, detach_dict # helper functions
 from policy import ACTPolicy, CNNMLPPolicy
-# from visualize_episodes import save_videos
 
 # Import new HDF5Loader
 from dataset.hdf5_loader import HDF5Loader
 from dataset.reader import ActionType, ObservationType
 
-# from sim_env import BOX_POSE
 import re
 
 def main(args):
@@ -173,15 +167,29 @@ def main(args):
 
     train_dataloader, val_dataloader, stats, _ = hdf5_loader.create_dataloaders()
 
+    # Convert stats tensors to numpy for consistent serialization
+    def _stats_to_numpy(d):
+        out = {}
+        for k, v in d.items():
+            try:
+                import torch
+                if isinstance(v, torch.Tensor):
+                    out[k] = v.detach().cpu().numpy()
+                else:
+                    out[k] = v
+            except Exception:
+                out[k] = v
+        return out
+    stats_np = _stats_to_numpy(stats)
     # Add stats to config for eval
-    config['stats'] = stats
+    config['stats'] = stats_np
 
     # save dataset stats
     if not os.path.isdir(ckpt_dir):
         os.makedirs(ckpt_dir)
     stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl')
     with open(stats_path, 'wb') as f:
-        pickle.dump(stats, f)
+        pickle.dump(stats_np, f)
 
     best_ckpt_info = train_bc(train_dataloader, val_dataloader, config)
     best_epoch, min_val_loss, best_state_dict = best_ckpt_info

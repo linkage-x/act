@@ -63,6 +63,12 @@ class HDF5Loader(DataLoaderBase):
         self.batch_size_train = config.get('batch_size_train', 32)
         self.batch_size_val = config.get('batch_size_val', 32)
         self.episode_len = config.get('episode_len', 5000)
+        # DataLoader settings (configurable)
+        self.num_workers_train = int(config.get('num_workers_train', 4))
+        self.num_workers_val = int(config.get('num_workers_val', 4))
+        self.prefetch_factor_train = int(config.get('prefetch_factor_train', 2))
+        self.prefetch_factor_val = int(config.get('prefetch_factor_val', 2))
+        self.persistent_workers = bool(config.get('persistent_workers', True))
 
         # Augmentation
         self.augmentation_config = config.get('augmentation_config', None)
@@ -277,12 +283,22 @@ class HDF5Loader(DataLoaderBase):
 
         # Create dataloaders
         train_dataloader = DataLoader(
-            train_dataset, batch_size=self.batch_size_train,
-            shuffle=True, pin_memory=True, num_workers=1, prefetch_factor=1
+            train_dataset,
+            batch_size=self.batch_size_train,
+            shuffle=True,
+            pin_memory=True,
+            num_workers=self.num_workers_train,
+            prefetch_factor=self.prefetch_factor_train if self.num_workers_train > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers_train > 0 else False,
         )
         val_dataloader = DataLoader(
-            val_dataset, batch_size=self.batch_size_val,
-            shuffle=False, pin_memory=True, num_workers=1, prefetch_factor=1  # No shuffle for validation
+            val_dataset,
+            batch_size=self.batch_size_val,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=self.num_workers_val,
+            prefetch_factor=self.prefetch_factor_val if self.num_workers_val > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers_val > 0 else False,
         )
 
         log.info(f"✅ Dataloaders created:")
@@ -561,11 +577,11 @@ class HDF5Loader(DataLoaderBase):
                     if store_ee_pose:
                         ee_action_array.append(ee_pose_array[-1] if ee_pose_array else np.zeros(8, dtype=np.float32))
 
-                # Process images - match configured camera_names with *_color keys, allow substring fallback
-                colors = point.get('colors', {})
-                if colors is None:
-                    colors = {}
+                # Process images - match configured camera_names with *_color keys (strict by default)
+                colors = point.get('colors', {}) or {}
                 if isinstance(colors, dict):
+                    selected_images = {}
+                    missing_cams = []
                     for cam_name in self.camera_names:
                         key_exact = f"{cam_name}_color"
                         selected_key = None
@@ -576,20 +592,26 @@ class HDF5Loader(DataLoaderBase):
                                 if k and k.endswith('_color') and cam_name in k:
                                     selected_key = k
                                     break
-                        if selected_key is None:
+                        if selected_key is None or not (colors[selected_key] and 'path' in colors[selected_key]):
+                            missing_cams.append(cam_name)
                             continue
-                        entry = colors.get(selected_key)
-                        if entry and isinstance(entry, dict) and 'path' in entry:
-                            img_path = os.path.join(episode_dir, entry['path'])
-                            try:
-                                img = cv2.imread(img_path)
-                                if img is not None:
-                                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                                    if img.shape[:2] != image_size:
-                                        img = cv2.resize(img, (image_size[1], image_size[0]))
-                                    image_arrays[cam_name].append(img)
-                            except Exception as e:
-                                log.warn(f"     ⚠️  Error loading {img_path}: {e}")
+                        selected_images[cam_name] = os.path.join(episode_dir, colors[selected_key]['path'])
+
+                    if missing_cams:
+                        log.warn(f"     ⚠️  Missing cameras at step {i}: {missing_cams}")
+                        if bool(self._config.get('strict_camera', True)):
+                            return False
+
+                    for cam_name, img_path in selected_images.items():
+                        try:
+                            img = cv2.imread(img_path)
+                            if img is not None:
+                                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                                if img.shape[:2] != image_size:
+                                    img = cv2.resize(img, (image_size[1], image_size[0]))
+                                image_arrays[cam_name].append(img)
+                        except Exception as e:
+                            log.warn(f"     ⚠️  Error loading {img_path}: {e}")
 
             except Exception as e:
                 log.warn(f"     ⚠️  Error processing step {i}: {e}")
