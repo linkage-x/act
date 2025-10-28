@@ -1,0 +1,23 @@
+# FR3机器人基础配置
+# 继承默认配置并针对FR3机器人进行定制
+
+extends: base/default
+
+robot:
+  name: fr3
+  state_dim: 8  # 7 DOF arm + 1 gripper
+
+data:
+  # UMI 相机键前缀（匹配 *_color）
+  camera_names:
+    - "left_hand"
+    - "left_hand_fisheye"
+
+  # 预处理后的建议 episode 长度（可按数据修正）
+  episode_len: 300
+
+training:
+  # FR3任务的推荐训练参数
+  batch_size: 64
+  num_epochs: 8000
+  lr: 5e-5

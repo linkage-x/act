@@ -1,0 +1,24 @@
+# FR3 Human Pick-and-Place (UMI) 82 Episodes
+# 数据来源：UMI 原始数据经转换（dependencies/act/dataset/umi_convert.yaml）
+
+extends: base/fr3_umi
+
+task:
+  name: fr3_human_pp_82ep
+
+data:
+  # 对应 UMI 转换输出目录（umi_convert.yaml 的 output_dir）
+  dataset_dirs:
+    - /boot/common_data/2025/umi_data_hdf5/single/1024_left_fr3_pick_n_place_humanhand_82eps
+  episode_len: 150         # 与 fr3_umi 基础配置一致；可按统计调整
+  num_episodes: 82
+
+training:
+  # 使用 ee→ee 训练（相对第0帧已在转换阶段处理）
+  ckpt_dir: ckpts/fr3_human_pp_82ep_ee2ee
+  batch_size: 64
+  num_epochs: 8000
+  lr: 5e-5
+  kl_weight: 10
+  chunk_size: 100
+
