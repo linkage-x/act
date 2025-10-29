@@ -204,6 +204,11 @@ class RerunEpisodeReader:
         return episode_data
     
     def get_episode_text_info(self, episode_id):
+        """Return a compact text summary for the episode if available.
+
+        UMI/other datasets may not contain a uniform "text" structure. This helper
+        should never block data conversion: missing fields are logged and omitted.
+        """
         episode_dir = os.path.join(self.task_dir, f"episode_{episode_id:04d}")
         json_path = os.path.join(episode_dir, self.json_file)
 
@@ -213,17 +218,27 @@ class RerunEpisodeReader:
         with open(json_path, 'r', encoding='utf-8') as jsonf:
             json_file = json.load(jsonf)
 
-        text_info = json_file["text"]
+        text_obj = json_file.get("text", {}) or {}
+        if not text_obj:
+            log.warn(f"Episode {episode_id}: missing 'text' section; skipping text summary")
+            return "description:  steps:  goal: "
+
+        desc = text_obj.get("desc", "")
+        goal = text_obj.get("goal", "")
+        steps_field = text_obj.get("steps", "")
+
         steps = ""
-        if isinstance(text_info["steps"], dict):
-            for step_number, cur_step in text_info["steps"].items():
-                steps += cur_step
-                steps += " "
-        else: steps = text_info["steps"]
-        
-        text_info = 'description: ' + text_info["desc"] + ' ' \
-                + 'steps: ' + steps + ' ' + 'goal: ' + text_info["goal"]        
-        return text_info
+        if isinstance(steps_field, dict):
+            try:
+                steps = " ".join([str(v) for _, v in steps_field.items()])
+            except Exception:
+                steps = ""
+        elif isinstance(steps_field, str):
+            steps = steps_field
+        else:
+            steps = ""
+
+        return f"description: {desc} steps: {steps} goal: {goal}"
     
     def _get_absolute_action(self, states, action_state, attribute_name = None):
         cur_action = {}
