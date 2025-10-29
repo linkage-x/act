@@ -62,7 +62,7 @@ class HDF5Loader(DataLoaderBase):
         self.camera_names = config.get('camera_names', ['ee_cam', 'third_person_cam'])
         self.batch_size_train = config.get('batch_size_train', 32)
         self.batch_size_val = config.get('batch_size_val', 32)
-        self.episode_len = config.get('episode_len', 5000)
+        self.episode_len = config.get('episode_len', 800)
         # DataLoader settings (configurable)
         self.num_workers_train = int(config.get('num_workers_train', 4))
         self.num_workers_val = int(config.get('num_workers_val', 4))
@@ -240,6 +240,14 @@ class HDF5Loader(DataLoaderBase):
         else:
             stats["has_ee_pose"] = False
 
+        # Ensure joint-control runs do not advertise EE pose stats even if they exist on disk
+        if self.control_mode != 'ee_pose' and stats.get("has_ee_pose", False):
+            stats["has_ee_pose"] = False
+            stats.pop("ee_pose_mean", None)
+            stats.pop("ee_pose_std", None)
+            stats.pop("ee_action_mean", None)
+            stats.pop("ee_action_std", None)
+
         return stats
 
     def create_dataloaders(self) -> Tuple[DataLoader, DataLoader, Dict[str, Any], bool]:
@@ -267,9 +275,7 @@ class HDF5Loader(DataLoaderBase):
 
         # Validate control mode availability
         if self.control_mode == 'ee_pose' and not norm_stats.get('has_ee_pose', False):
-            log.warn("⚠️ EE pose control mode requested but no EE pose data found in dataset!")
-            log.warn("⚠️ Falling back to joint control mode.")
-            self.control_mode = 'joint'
+            raise Exception("⚠️ EE pose control mode requested but no EE pose data found in dataset!")
 
         # Create datasets
         train_dataset = EpisodicDataset(

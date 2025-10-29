@@ -1,10 +1,10 @@
 # HDF5 Loader Configuration for ACT
 
 # Task directory (for convert mode: source directory with raw episodes)
-task_dir: "/boot/common_data/2025/fr3/1022_insert_tube_fr3_pika_51eps"
+task_dir: "/data/fr3/fr3/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep"
 
 # Output directory (for convert mode: where to save HDF5 files)
-output_dir: "/boot/common_data/2025/fr3_hdf5/1022_insert_tube_fr3_pika_51eps_hdf5"
+output_dir: "/data/fr3_hdf5/fr3_hdf5/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep_hdf5"
 
 # Action type: "joint_position" or "end_effector_pose"
 action_type: "joint_position"
@@ -13,7 +13,7 @@ action_type: "joint_position"
 obs_type: "joint_position_only"
 
 # Skip steps for downsampling (1 = no skip, 2 = every 2nd frame, etc.)
-skip_steps_nums: 2
+skip_steps_nums: 3
 
 # Camera names
 camera_names:
@@ -35,7 +35,7 @@ is_sim: false
 # Episode length filtering (episodes outside this range will be skipped during conversion)
 # Set to null to disable filtering
 min_episode_len: 200
-max_episode_len: 1000
+max_episode_len: 4000
 
 # Batch size for training
 batch_size_train: 32
@@ -44,7 +44,7 @@ batch_size_train: 32
 batch_size_val: 32
 
 # Maximum episode length
-episode_len: 500
+episode_len: 800
 
 # Number of episodes to use (null = use all)
 num_episodes: null

@@ -102,6 +102,8 @@ def main(args):
                          'kl_weight': args['kl_weight'],
                          'hidden_dim': args['hidden_dim'],
                          'dim_feedforward': args['dim_feedforward'],
+                         'dropout': args.get('dropout', 0.1),
+                         'weight_decay': args.get('weight_decay', 1e-4),
                          'lr_backbone': lr_backbone,
                          'backbone': backbone,
                          'enc_layers': enc_layers,
@@ -134,15 +136,17 @@ def main(args):
         'stats': None  # Will be filled after data loading
     }
 
-    # 加载光照增强配置
-    augmentation_config = None
-    lighting_config_path = os.path.join(os.path.dirname(__file__), 'configs', 'lighting_augmentation.yaml')
-    if os.path.exists(lighting_config_path):
-        with open(lighting_config_path, 'r', encoding='utf-8') as f:
-            augmentation_config = yaml.safe_load(f)
-        print(f"✅ 已加载光照增强配置: {lighting_config_path}")
+    # 从 task_config 获取数据增强配置
+    augmentation_config = task_config.get('augmentation_config')
+    if augmentation_config:
+        print(f"✅ 已从任务配置加载数据增强配置")
+        # 显示启用的增强类型
+        if augmentation_config.get('lighting_augmentation', {}).get('enabled'):
+            print(f"   - 光照增强: 已启用")
+        if augmentation_config.get('rotation_augmentation', {}).get('enabled'):
+            print(f"   - 旋转增强: 已启用")
     else:
-        print(f"⚠️  光照增强配置文件不存在: {lighting_config_path}")
+        print(f"⚠️  未配置数据增强")
 
     # Create HDF5 data loader with control mode support
     # Determine action type and observation type from control mode
@@ -407,6 +411,8 @@ if __name__ == '__main__':
         print(f"  动作块大小:   {args_data['chunk_size']}")
         print(f"  隐藏层维度:   {args_data['hidden_dim']}")
         print(f"  前馈网络维度: {args_data['dim_feedforward']}")
+        print(f"  Dropout:      {args_data.get('dropout', 0.1)}")
+        print(f"  权重衰减:     {args_data.get('weight_decay', 1e-4)}")
         print()
 
         print("📁 数据配置:")

@@ -1,0 +1,32 @@
+# pyproject.toml
+[project]
+name = "act"
+version = "0.1.0"
+requires-python = "==3.10"
+description = "hirol act module"
+readme = "README.md"
+dependencies = [
+    "torch",
+    "torchvision",
+    "pyquaternion",
+    "pyyaml",
+    "rospkg",
+    "pexpect",
+    "mujoco",
+    "dm_control",
+    "opencv-python",
+    "matplotlib",
+    "einops",
+    "packaging",
+    "h5py",
+    "ipython",
+    "glog",
+]
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# Do not accidentally vendor the separate `detr` project when building this wheel
+exclude = ["detr*"]

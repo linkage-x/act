@@ -1,0 +1,27 @@
+
+services:
+  hirol_act:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    shm_size: '8gb'    
+    volumes:
+      - ../:/workspace
+      - /boot/common_data/2025:/data
+    environment:
+      - http_proxy=
+      - https_proxy=
+      - all_proxy=
+    privileged: true
+    user: user
+    # network_mode: host
+    stdin_open: true
+    tty: true
+    command: ["tail", "-f", "/dev/null"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, graphics, display, utility, video, compute]

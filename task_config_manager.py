@@ -264,6 +264,7 @@ class TaskConfigManager:
             'episode_len': data_config.get('episode_len'),
             'camera_names': data_config.get('camera_names'),
             'state_dim': robot_config.get('state_dim'),
+            'augmentation_config': data_config.get('augmentation'),  # 传递增强配置
         }
 
         # 处理多数据集情况
@@ -297,6 +298,8 @@ class TaskConfigManager:
             'chunk_size': training_config.get('chunk_size', 100),
             'hidden_dim': training_config.get('hidden_dim', 512),
             'dim_feedforward': training_config.get('dim_feedforward', 3200),
+            'dropout': training_config.get('dropout', 0.1),
+            'weight_decay': parse_numeric(training_config.get('weight_decay', 1e-4)),
         }
 
         return {
