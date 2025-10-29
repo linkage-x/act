@@ -147,7 +147,8 @@ class RerunEpisodeReader:
                     cur_actions[key] = np.zeros(7)
                     next_pose = np.array(next_state_data[key]["pose"])
                     next_pose = self.apply_rotation_offset(next_pose, key)
-                    cur_pose = self.apply_rotation_offset(np.array(pose["pose"]))
+                    # Pass key to ensure rotation_transform is applied consistently
+                    cur_pose = self.apply_rotation_offset(np.array(pose["pose"]), key)
                     cur_actions[key] = self.get_pose_diff(next_pose, cur_pose)
                 if self._action_ori_type == "euler":
                     modified_action = {}
@@ -167,6 +168,20 @@ class RerunEpisodeReader:
                 cur_actions[key] = np.hstack((cur_actions[key], tool_state["position"]))
             
             if counter % skip_steps_nums == 0:
+                # Apply rotation to ee_states when writing episode_data so downstream
+                # (e.g., HDF5 conversion) consumes frame-aligned poses.
+                raw_ee_states = item_data.get('ee_states', {}) or {}
+                rotated_ee_states = {}
+                for k, st in raw_ee_states.items():
+                    try:
+                        pose_rot = self.apply_rotation_offset(st["pose"], k)
+                    except Exception:
+                        pose_rot = st.get("pose", None)
+                    rotated_ee_states[k] = {
+                        "pose": pose_rot,
+                        "time_stamp": st.get("time_stamp", None)
+                    }
+
                 episode_data.append(
                     {
                         'idx': item_data.get('idx', 0),
@@ -175,7 +190,7 @@ class RerunEpisodeReader:
                         'depths': depths,
                         'depths_time_stamp': depths_time_stamp,
                         'joint_states': item_data.get('joint_states', {}),
-                        'ee_states': item_data.get('ee_states', {}),
+                        'ee_states': rotated_ee_states,
                         'tools': item_data.get('tools', {}),
                         'imus': item_data.get('imus', {}),
                         'tactiles': item_data.get('tactiles', {}),
@@ -269,6 +284,7 @@ class RerunEpisodeReader:
             if key not in self._rotation_transform:
                 raise ValueError(f'Got the rotation transform but {key} not found in {self._rotation_transform}')
             new_pose[3:] = self.transform_quat(pose[3:], self._rotation_transform[key])
+            log.info(f"apply_rotation_offset {self._rotation_transform[key]}")
         return new_pose
         
     def _process_images(self, item_data, data_type, dir_path):

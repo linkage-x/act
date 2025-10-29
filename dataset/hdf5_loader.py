@@ -360,22 +360,15 @@ class HDF5Loader(DataLoaderBase):
 
             log.info(f"🔄 Processing {episode_name}...")
 
-            # Load episode data
-            data_file = os.path.join(episode_dir, 'data.json')
-            if not os.path.exists(data_file):
-                log.error(f"   ❌ No data.json found in {episode_dir}")
+            # Load episode via unified reader
+            episode_parsed, _ = self.load_episode(source_dir, episode_name, self.skip_steps_nums)
+            if episode_parsed is None or len(episode_parsed) == 0:
+                log.error(f"   ❌ Failed to parse episode via reader: {episode_name}")
                 continue
 
-            with open(data_file, 'r') as f:
-                episode_data = json.load(f)
-
-            data_points = episode_data.get('data', [])
-            if not data_points:
-                log.error(f"   ❌ No data points found in {episode_name}")
-                continue
-
+            data_points = episode_parsed
             original_len = len(data_points)
-            log.info(f"   📊 Original length: {original_len} steps")
+            log.info(f"   📊 Parsed length (after skip): {original_len} steps")
 
             # Apply episode length filtering if configured
             if min_episode_len is not None and original_len < min_episode_len:
@@ -384,11 +377,6 @@ class HDF5Loader(DataLoaderBase):
             if max_episode_len is not None and original_len > max_episode_len:
                 log.warn(f"   ⚠️  Episode too long ({original_len} > {max_episode_len} steps), PASS...")
                 continue
-
-            # Apply skip_steps_nums downsampling (like lerobot_loader)
-            if self.skip_steps_nums > 1:
-                data_points = data_points[::self.skip_steps_nums]
-                log.info(f"   📉 After skip_steps_nums={self.skip_steps_nums}: {len(data_points)} steps")
 
             # Convert to HDF5
             output_name = f"episode_{global_counter[0]}.hdf5"
@@ -583,35 +571,28 @@ class HDF5Loader(DataLoaderBase):
                     selected_images = {}
                     missing_cams = []
                     for cam_name in self.camera_names:
-                        key_exact = f"{cam_name}_color"
-                        selected_key = None
-                        if key_exact in colors:
-                            selected_key = key_exact
-                        else:
-                            for k in colors.keys():
-                                if k and k.endswith('_color') and cam_name in k:
-                                    selected_key = k
-                                    break
-                        if selected_key is None or not (colors[selected_key] and 'path' in colors[selected_key]):
+                        # Accept exact key or key with '_color' suffix
+                        key = cam_name if cam_name in colors else (f"{cam_name}_color" if f"{cam_name}_color" in colors else None)
+                        if key is None or colors.get(key) is None:
                             missing_cams.append(cam_name)
                             continue
-                        selected_images[cam_name] = os.path.join(episode_dir, colors[selected_key]['path'])
+                        selected_images[cam_name] = colors[key]
 
                     if missing_cams:
                         log.warn(f"     ⚠️  Missing cameras at step {i}: {missing_cams}")
                         if bool(self._config.get('strict_camera', True)):
                             return False
 
-                    for cam_name, img_path in selected_images.items():
+                    for cam_name, img in selected_images.items():
                         try:
-                            img = cv2.imread(img_path)
-                            if img is not None:
-                                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                                if img.shape[:2] != image_size:
-                                    img = cv2.resize(img, (image_size[1], image_size[0]))
-                                image_arrays[cam_name].append(img)
+                            img_np = np.array(img)
+                            if img_np is not None:
+                                if img_np.shape[:2] != image_size:
+                                    import cv2
+                                    img_np = cv2.resize(img_np, (image_size[1], image_size[0]))
+                                image_arrays[cam_name].append(img_np)
                         except Exception as e:
-                            log.warn(f"     ⚠️  Error loading {img_path}: {e}")
+                            log.warn(f"     ⚠️  Error processing image for {cam_name}: {e}")
 
             except Exception as e:
                 log.warn(f"     ⚠️  Error processing step {i}: {e}")

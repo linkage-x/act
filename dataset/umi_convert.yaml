@@ -22,6 +22,9 @@ skip_steps_nums: 1
 image_size: [480, 640]
 store_ee_pose: true
 
+rotation_transform:
+  single: [0.7071068, 0, 0.7071068, 0]
+  
 # UMI mode: store EE pose relative to the first valid frame
 umi_mode: true
 
