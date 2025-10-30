@@ -4,22 +4,22 @@
 # 光照数据增强配置
 lighting_augmentation:
   # 是否启用光照增强 (设为false可快速禁用)
-  enabled: false
+  enabled: true
 
   # 颜色抖动参数 (取值范围 0-1)
-  brightness: 0.3    # 亮度变化范围 ±30%
-  contrast: 0.2      # 对比度变化范围 ±20%
-  saturation: 0.2    # 饱和度变化范围 ±20%
+  brightness: 0.2    # 亮度变化范围 ±30%
+  contrast: 0.1      # 对比度变化范围 ±20%
+  saturation: 0.1    # 饱和度变化范围 ±20%
   hue: 0.1          # 色调变化范围 ±10%
 
   # 自适应光照标准化
-  adaptive_normalization: true
+  adaptive_normalization: false
   target_mean: 0.5   # 目标亮度均值 (0-1)
 
 # 相机角度增强配置（旋转）
 rotation_augmentation:
   # 是否启用旋转增强 (设为false可快速禁用)
-  enabled: false
+  enabled: true
 
   # 旋转角度范围（单位：度）
   max_rotation_degrees: 5.0  # 随机旋转 ±5度

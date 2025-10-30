@@ -1,0 +1,28 @@
+# FR3 Mixed Training - 更强正则 + Dropout 调整
+# 在 customcfg1 基础上引入 transformer dropout，并保留较小模型规模
+
+extends: base/fr3
+
+task:
+  name: fr3_insert_tube
+
+data:
+  dataset_dirs:
+    - /boot/common_data/2025/fr3_hdf5/1023_insert_tube_fr3_3dmouse_61ep_hdf5
+    - /boot/common_data/2025/fr3_hdf5/1023_insert_tube_fr3_3dmouse_61ep_hdf5  # duplicate to balance domain
+    - /boot/common_data/2025/fr3_hdf5/1025_insert_tube_fr3_3dmouse_99ep_hdf5
+  episode_len: 300
+
+training:
+  ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q_dropout02
+  batch_size: 64
+  num_epochs: 8000
+  lr: 5e-5
+
+  kl_weight: 12
+  chunk_size: 60
+  hidden_dim: 256
+  dim_feedforward: 1600
+  dropout: 0.2
+  lr_backbone: 0
+  position_embedding: sine

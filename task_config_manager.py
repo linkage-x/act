@@ -297,6 +297,7 @@ class TaskConfigManager:
             'chunk_size': training_config.get('chunk_size', 100),
             'hidden_dim': training_config.get('hidden_dim', 512),
             'dim_feedforward': training_config.get('dim_feedforward', 3200),
+            'dropout': training_config.get('dropout', 0.1),
         }
 
         return {
