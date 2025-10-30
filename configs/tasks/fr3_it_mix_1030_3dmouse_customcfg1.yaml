@@ -9,7 +9,7 @@ task:
 
 data:
   dataset_dirs:
-    - /boot/common_data/2025/fr3_hdf5/1023_insert_tube_fr3_3dmouse_61ep_hdf5
+    # - /boot/common_data/2025/fr3_hdf5/1023_insert_tube_fr3_3dmouse_61ep_hdf5
     - /boot/common_data/2025/fr3_hdf5/1025_insert_tube_fr3_3dmouse_99ep_hdf5
 # 
   episode_len: 300  # 跨数据集的最大episode长度

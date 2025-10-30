@@ -103,6 +103,7 @@ def main(args):
                          'hidden_dim': args['hidden_dim'],
                          'dim_feedforward': args['dim_feedforward'],
                          'dropout': args.get('dropout', 0.1),
+                         'weight_decay': args.get('weight_decay', 1e-4),
                          'lr_backbone': lr_backbone,
                          'backbone': backbone,
                          'enc_layers': enc_layers,
@@ -408,6 +409,8 @@ if __name__ == '__main__':
         print(f"  动作块大小:   {args_data['chunk_size']}")
         print(f"  隐藏层维度:   {args_data['hidden_dim']}")
         print(f"  前馈网络维度: {args_data['dim_feedforward']}")
+        print(f"  Dropout:      {args_data.get('dropout', 0.1)}")
+        print(f"  权重衰减:     {args_data.get('weight_decay', 1e-4)}")
         print()
 
         print("📁 数据配置:")
