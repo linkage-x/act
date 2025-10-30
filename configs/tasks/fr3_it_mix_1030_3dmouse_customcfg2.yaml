@@ -15,14 +15,14 @@ data:
 
 training:
   ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q_dropout02
-  batch_size: 64
+  batch_size: 128
   num_epochs: 8000
-  lr: 5e-5
+  lr: 1e-4
 
   kl_weight: 12
   chunk_size: 60
-  hidden_dim: 256
-  dim_feedforward: 1600
+  hidden_dim: 512
+  dim_feedforward: 3200
   dropout: 0.2
   lr_backbone: 0
   position_embedding: sine
