@@ -267,9 +267,7 @@ class HDF5Loader(DataLoaderBase):
 
         # Validate control mode availability
         if self.control_mode == 'ee_pose' and not norm_stats.get('has_ee_pose', False):
-            log.warn("⚠️ EE pose control mode requested but no EE pose data found in dataset!")
-            log.warn("⚠️ Falling back to joint control mode.")
-            self.control_mode = 'joint'
+            raise Exception("⚠️ EE pose control mode requested but no EE pose data found in dataset!")
 
         # Create datasets
         train_dataset = EpisodicDataset(

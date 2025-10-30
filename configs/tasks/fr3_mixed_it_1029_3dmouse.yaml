@@ -18,7 +18,7 @@ data:
   episode_len: 300  # 跨数据集的最大episode长度
 
 training:
-  ckpt_dir: ckpts/fr3_mixed_it_1029_3dmouse_ee2ee
+  ckpt_dir: ckpts/fr3_mixed_it_1029_3dmouse
   batch_size: 64  # 混合数据集使用较小batch size
   num_epochs: 8000
   lr: 5e-5
