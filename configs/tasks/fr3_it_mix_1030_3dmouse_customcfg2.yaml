@@ -15,9 +15,9 @@ data:
 
 training:
   ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q_dropout02
-  batch_size: 128
+  batch_size: 48
   num_epochs: 8000
-  lr: 1e-4
+  lr: 4e-5
 
   kl_weight: 12
   chunk_size: 60
