@@ -1,0 +1,21 @@
+# FR3 Mixed Training - Block Stacking
+# 对应 constants.py 中的 fr3_mixed_training_bs 配置
+# 混合多个数据集进行训练
+
+extends: base/fr3
+
+task:
+  name: fr3_insert_tube
+
+data:
+  dataset_dirs:
+    - /boot/common_data/2025/fr3_hdf5/1023_insert_tube_fr3_3dmouse_61ep_hdf5
+    - /boot/common_data/2025/fr3_hdf5/1025_insert_tube_fr3_3dmouse_99ep_hdf5
+
+  episode_len: 300  # 跨数据集的最大episode长度
+
+training:
+  ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q
+  batch_size: 64  # 混合数据集使用较小batch size
+  num_epochs: 8000
+  lr: 5e-5
