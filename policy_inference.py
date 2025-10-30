@@ -188,9 +188,26 @@ class ACTInference(PolicyInference):
             'vq_dim': kwargs.get('vq_dim', None) if kwargs.get('vq_dim') is None else int(kwargs.get('vq_dim')),
             'action_dim': int(state_dim),
             'no_encoder': bool(kwargs.get('no_encoder', False)),
+            'dropout': float(kwargs.get('dropout', 0.1)),
         }
+
+        # Record expected control mode for dataset-stat overrides
+        self.control_mode = kwargs.get('control_mode', 'joint')
+        self.expected_obs_key = kwargs.get('obs_key', 'q')
+        self.expected_act_key = kwargs.get('act_key', 'q')
         
         super().__init__(ckpt_dir, policy_config)
+
+    def load_dataset_stats(self):
+        """加载数据统计并根据控制模式修正 EE pose 标记"""
+        super().load_dataset_stats()
+
+        if getattr(self, "control_mode", "joint") != 'ee_pose':
+            if self.dataset_stats.get('has_ee_pose', False):
+                print("⚠️ 覆盖 has_ee_pose 标记：当前推理为关节模式")
+            self.dataset_stats['has_ee_pose'] = False
+            for key in ('ee_pose_mean', 'ee_pose_std', 'ee_action_mean', 'ee_action_std'):
+                self.dataset_stats.pop(key, None)
         
     def init_policy(self):
         """初始化ACT策略"""

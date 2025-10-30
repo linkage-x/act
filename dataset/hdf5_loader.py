@@ -240,6 +240,14 @@ class HDF5Loader(DataLoaderBase):
         else:
             stats["has_ee_pose"] = False
 
+        # Ensure joint-control runs do not advertise EE pose stats even if they exist on disk
+        if self.control_mode != 'ee_pose' and stats.get("has_ee_pose", False):
+            stats["has_ee_pose"] = False
+            stats.pop("ee_pose_mean", None)
+            stats.pop("ee_pose_std", None)
+            stats.pop("ee_action_mean", None)
+            stats.pop("ee_action_std", None)
+
         return stats
 
     def create_dataloaders(self) -> Tuple[DataLoader, DataLoader, Dict[str, Any], bool]:
