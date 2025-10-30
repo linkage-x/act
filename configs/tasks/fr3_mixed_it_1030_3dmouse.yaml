@@ -5,20 +5,20 @@
 extends: base/fr3
 
 task:
-  name: fr3_mixed_it_1029_3dmouse
+  name: fr3_insert_tube
 
 data:
   dataset_dirs:
     # - /boot/common_data/2025/fr3_hdf5/1013_inserttube_fr3_pika_50ep_ds_hdf5
     # - /boot/common_data/2025/fr3_hdf5/1021_insert_tube_fr3_pika_150eps_hdf5
     # - /boot/common_data/2025/fr3_hdf5/1022_insert_tube_fr3_pika_51eps_hdf5
-    - /boot/common_data/2025/fr3_hdf5/1023_insert_tube_fr3_3dmouse_61ep_hdf5
+    # - /boot/common_data/2025/fr3_hdf5/1023_insert_tube_fr3_3dmouse_61ep_hdf5
     - /boot/common_data/2025/fr3_hdf5/1025_insert_tube_fr3_3dmouse_99ep_hdf5
 
   episode_len: 300  # 跨数据集的最大episode长度
 
 training:
-  ckpt_dir: ckpts/fr3_mixed_it_1029_3dmouse
+  ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q
   batch_size: 64  # 混合数据集使用较小batch size
   num_epochs: 8000
   lr: 5e-5
