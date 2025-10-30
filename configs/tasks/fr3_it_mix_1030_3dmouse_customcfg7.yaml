@@ -33,7 +33,7 @@ augmentation:
         - side_cam
 
 training:
-  ckpt_dir: ckpts/fr3_it_1030_3dmouse_cfg6_q2q
+  ckpt_dir: ckpts/fr3_it_1030_3dmouse_cfg7_q2q
   batch_size: 32
   num_epochs: 8000
   lr: 3e-5
