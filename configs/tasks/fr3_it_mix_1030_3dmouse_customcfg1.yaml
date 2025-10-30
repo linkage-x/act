@@ -15,7 +15,7 @@ data:
   episode_len: 300  # 跨数据集的最大episode长度
 
 training:
-  ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q
+  ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q_cc1
   batch_size: 64  # 混合数据集使用较小batch size
   num_epochs: 8000
   lr: 5e-5
