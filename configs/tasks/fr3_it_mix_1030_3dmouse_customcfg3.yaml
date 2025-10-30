@@ -11,6 +11,26 @@ data:
     - /boot/common_data/2025/fr3_hdf5/1023_insert_tube_fr3_3dmouse_67ep_hdf5
   episode_len: 300
 
+  # 数据增强配置 - 提高模型对环境变化的鲁棒性
+  augmentation:
+    # 光照数据增强配置
+    lighting_augmentation:
+      enabled: false
+      brightness: 0.2    # 亮度变化 ±20%
+      contrast: 0.1      # 对比度变化 ±10%
+      saturation: 0.1    # 饱和度变化 ±10%
+      hue: 0.1          # 色调变化 ±10%
+      adaptive_normalization: false
+      target_mean: 0.5
+
+    # 相机角度增强配置（旋转）
+    rotation_augmentation:
+      enabled: false
+      max_rotation_degrees: 5.0
+      target_cameras:
+        - third_person_cam
+        - side_cam
+
 training:
   ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q_weight_decay
   batch_size: 8

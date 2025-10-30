@@ -264,6 +264,7 @@ class TaskConfigManager:
             'episode_len': data_config.get('episode_len'),
             'camera_names': data_config.get('camera_names'),
             'state_dim': robot_config.get('state_dim'),
+            'augmentation_config': data_config.get('augmentation'),  # 传递增强配置
         }
 
         # 处理多数据集情况
