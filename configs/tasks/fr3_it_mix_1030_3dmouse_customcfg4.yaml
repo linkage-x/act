@@ -32,7 +32,7 @@ data:
         - side_cam
 
 training:
-  ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q_weight_decay
+  ckpt_dir: ckpts/fr3_it_1030_3dmouse_q2q_config4
   batch_size: 24
   num_epochs: 8000
   lr: 4e-5
