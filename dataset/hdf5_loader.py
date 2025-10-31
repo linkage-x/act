@@ -94,7 +94,6 @@ class HDF5Loader(DataLoaderBase):
             dataset_dirs = self.dataset_dir
 
         log.info(f'\n📁 Loading data from: {dataset_dirs}')
-        log.info(f'🎯 Control mode: {self.control_mode}\n')
 
         # Get list of available episode files
         episode_files = []
@@ -127,8 +126,7 @@ class HDF5Loader(DataLoaderBase):
 
                     for idx in test_indices:
                         if idx < episode_length:
-                            _ = root['/observations/qpos'][idx]
-                            _ = root['/observations/qvel'][idx]
+                            _ = root['/observations/state'][idx]
                             if '/observations/images' in root:
                                 cam_names = list(root['/observations/images'].keys())
                                 for cam_name in cam_names:
@@ -166,19 +164,15 @@ class HDF5Loader(DataLoaderBase):
         Returns:
             Dictionary containing normalization statistics
         """
-        all_qpos_data = []
+        all_state_data = []
         all_action_data = []
-        all_ee_pose_data = []
-        all_ee_action_data = []
-
-        has_ee_pose = False
 
         for episode_id in episode_ids:
             dir_path, local_episode_id = episode_id_to_dir[episode_id]
             dataset_path = os.path.join(dir_path, f'episode_{local_episode_id}.hdf5')
             try:
                 with h5py.File(dataset_path, 'r') as root:
-                    qpos = root['/observations/qpos'][()]
+                    state = root['/observations/state'][()]
                     action = root['/action'][()]
 
                     # Check if EE pose data is available
@@ -189,14 +183,14 @@ class HDF5Loader(DataLoaderBase):
                         all_ee_pose_data.append(torch.from_numpy(ee_pose))
                         all_ee_action_data.append(torch.from_numpy(ee_action))
 
-                all_qpos_data.append(torch.from_numpy(qpos))
+                all_state_data.append(torch.from_numpy(state))
                 all_action_data.append(torch.from_numpy(action))
             except Exception as e:
                 log.error(f"Skipping {dataset_path} due to error: {e}")
                 continue
 
         # Concatenate all data
-        all_qpos_data = torch.cat(all_qpos_data, dim=0)
+        all_state_data = torch.cat(all_state_data, dim=0)
         all_action_data = torch.cat(all_action_data, dim=0)
 
         # Normalize joint action data
@@ -204,18 +198,18 @@ class HDF5Loader(DataLoaderBase):
         action_std = all_action_data.std(dim=0, keepdim=True)
         action_std = torch.clip(action_std, 1e-2, np.inf)
 
-        # Normalize qpos data
-        qpos_mean = all_qpos_data.mean(dim=0, keepdim=True)
-        qpos_std = all_qpos_data.std(dim=0, keepdim=True)
-        qpos_std = torch.clip(qpos_std, 1e-2, np.inf)
+        # Normalize state data
+        state_mean = all_state_data.mean(dim=0, keepdim=True)
+        state_std = all_state_data.std(dim=0, keepdim=True)
+        state_std = torch.clip(state_std, 1e-2, np.inf)
 
         # Keep stats as torch tensors for compatibility with EpisodicDataset
         stats = {
             "action_mean": action_mean.squeeze(),
             "action_std": action_std.squeeze(),
-            "qpos_mean": qpos_mean.squeeze(),
-            "qpos_std": qpos_std.squeeze(),
-            "example_qpos": qpos
+            "state_mean": state_mean.squeeze(),
+            "state_std": state_std.squeeze(),
+            "example_state": state
         }
 
         # Compute EE pose normalization stats if available
@@ -318,7 +312,6 @@ class HDF5Loader(DataLoaderBase):
         Convert raw episode data to HDF5 format with skip_steps_nums downsampling
         Similar to lerobot_loader.py but converts to HDF5 instead of LeRobotDataset
         """
-        import json
         import cv2
         import time
         from tqdm import tqdm
@@ -365,17 +358,10 @@ class HDF5Loader(DataLoaderBase):
             episode_dir = os.path.join(source_dir, episode_name)
 
             log.info(f"🔄 Processing {episode_name}...")
-
-            # Load episode data
-            data_file = os.path.join(episode_dir, 'data.json')
-            if not os.path.exists(data_file):
-                log.error(f"   ❌ No data.json found in {episode_dir}")
-                continue
-
-            with open(data_file, 'r') as f:
-                episode_data = json.load(f)
-
-            data_points = episode_data.get('data', [])
+            
+            # Load episode data via DataLoaderBase helper
+            episode_data, _ = self.load_episode(source_dir, episode_name, self.skip_steps_nums)
+            data_points = episode_data or []
             if not data_points:
                 log.error(f"   ❌ No data points found in {episode_name}")
                 continue
@@ -390,11 +376,6 @@ class HDF5Loader(DataLoaderBase):
             if max_episode_len is not None and original_len > max_episode_len:
                 log.warn(f"   ⚠️  Episode too long ({original_len} > {max_episode_len} steps), PASS...")
                 continue
-
-            # Apply skip_steps_nums downsampling (like lerobot_loader)
-            if self.skip_steps_nums > 1:
-                data_points = data_points[::self.skip_steps_nums]
-                log.info(f"   📉 After skip_steps_nums={self.skip_steps_nums}: {len(data_points)} steps")
 
             # Convert to HDF5
             output_name = f"episode_{global_counter[0]}.hdf5"
@@ -429,7 +410,7 @@ class HDF5Loader(DataLoaderBase):
         return total_converted
 
     def _convert_episode_to_hdf5(self, data_points, episode_dir, output_path,
-                                 image_size=(480, 640), store_ee_pose=True, is_sim=False, umi_mode=False):
+                                 image_size=(480, 640), is_sim=False):
         """
         Convert episode data points to HDF5 format
 
@@ -446,58 +427,9 @@ class HDF5Loader(DataLoaderBase):
 
         episode_len = len(data_points)
 
-        # ---- UMI helpers: pose math (quaternion [qx,qy,qz,qw]) ----
-        def _quat_normalize(q):
-            q = np.asarray(q, dtype=np.float32)
-            n = np.linalg.norm(q)
-            if n < 1e-8:
-                return np.array([0, 0, 0, 1], dtype=np.float32)
-            return q / n
-
-        def _quat_mul(q1, q2):
-            x1, y1, z1, w1 = q1
-            x2, y2, z2, w2 = q2
-            x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-            y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-            z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-            w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-            return _quat_normalize(np.array([x, y, z, w], dtype=np.float32))
-
-        def _quat_inv(q):
-            x, y, z, w = q
-            return _quat_normalize(np.array([-x, -y, -z, w], dtype=np.float32))
-
-        def _quat_apply(q, v):
-            q_vec = q[:3]
-            w = q[3]
-            t = 2.0 * np.cross(q_vec, v)
-            return v + w * t + np.cross(q_vec, t)
-
-        def _pose_rel_to(pose_abs, base_abs):
-            p = np.asarray(pose_abs[:3], dtype=np.float32)
-            q = _quat_normalize(np.asarray(pose_abs[3:], dtype=np.float32))
-            p0 = np.asarray(base_abs[:3], dtype=np.float32)
-            q0 = _quat_normalize(np.asarray(base_abs[3:], dtype=np.float32))
-            q0_inv = _quat_inv(q0)
-            dp = _quat_apply(q0_inv, (p - p0))
-            dq = _quat_mul(q0_inv, q)
-            return np.concatenate([dp, dq], dtype=np.float32)
-
-        # Find base EE pose for UMI (first valid)
-        base_ee_pose_abs = None
-        if umi_mode and store_ee_pose:
-            for _pt in data_points:
-                es = _pt.get('ee_states', {})
-                if 'single' in es and 'pose' in es['single']:
-                    base_ee_pose_abs = np.array(es['single']['pose'], dtype=np.float32)
-                    break
-
         # Prepare arrays
-        qpos_array = []
-        qvel_array = []
+        state_array = []
         action_array = []
-        ee_pose_array = []
-        ee_action_array = []
         # Initialize image arrays based on configured camera names
         image_arrays = {cam_name: [] for cam_name in self.camera_names}
 
@@ -505,17 +437,11 @@ class HDF5Loader(DataLoaderBase):
         for i, point in enumerate(data_points):
             try:
                 # Extract joint states
-                joint_states = point.get('joint_states') or {}
+                joint_states = point.get('observations') or {}
                 positions = []
-                velocities = []
                 if isinstance(joint_states, dict) and 'single' in joint_states:
                     positions = joint_states['single'].get('position') or []
-                    velocities = joint_states['single'].get('velocity') or []
-                if (not positions or not velocities) and umi_mode:
-                    # UMI数据可能无关节，使用零填充
-                    positions = [0.0] * 7
-                    velocities = [0.0] * 7
-                if len(positions) < 7 or len(velocities) < 7:
+                if len(positions) < 7:
                     log.warn(f"     ⚠️  Insufficient joint data at step {i}")
                     return False
 
@@ -526,62 +452,11 @@ class HDF5Loader(DataLoaderBase):
                     gripper_pos = tools['single']['position']
 
                 # Convert to ACT format: 8 DOF (7 joints + 1 gripper)
-                qpos = np.zeros(8, dtype=np.float32)
-                qvel = np.zeros(8, dtype=np.float32)
-                qpos[:7] = positions[:7]
-                qvel[:7] = velocities[:7]
-                qpos[7] = gripper_pos
-                qvel[7] = 0.0
+                state = np.zeros(8, dtype=np.float32)
+                state[:7] = positions[:7]
+                state[7] = gripper_pos
 
-                qpos_array.append(qpos)
-                qvel_array.append(qvel)
-
-                # Extract EE pose if available
-                if store_ee_pose:
-                    ee_states = point.get('ee_states') or {}
-                    if isinstance(ee_states, dict) and 'single' in ee_states and 'pose' in ee_states['single']:
-                        # EE pose (absolute) → relative if UMI
-                        ee_pose_abs = np.array(ee_states['single']['pose'], dtype=np.float32)
-                        ee_pose_rel = _pose_rel_to(ee_pose_abs, base_ee_pose_abs) if (umi_mode and base_ee_pose_abs is not None) else ee_pose_abs
-                        ee_pose_with_gripper = np.append(ee_pose_rel, gripper_pos)
-                        ee_pose_array.append(ee_pose_with_gripper)
-                    else:
-                        ee_pose_array.append(np.zeros(8, dtype=np.float32))
-
-                # Actions (use next state as action, or current for last step)
-                if i < episode_len - 1:
-                    next_point = data_points[i + 1]
-                    next_joint_states = next_point.get('joint_states') or {}
-                    if isinstance(next_joint_states, dict) and 'single' in next_joint_states:
-                        next_positions = next_joint_states['single'].get('position', positions) or positions
-                        next_tools = next_point.get('tools') or {}
-                        next_gripper_pos = gripper_pos
-                        if isinstance(next_tools, dict) and 'single' in next_tools and isinstance(next_tools['single'], dict) and 'position' in next_tools['single']:
-                            next_gripper_pos = next_tools['single']['position']
-
-                        action_qpos = np.zeros(8, dtype=np.float32)
-                        action_qpos[:7] = next_positions[:7]
-                        action_qpos[7] = next_gripper_pos
-                        action_array.append(action_qpos)
-
-                        # EE pose action
-                        if store_ee_pose:
-                            next_ee_states = next_point.get('ee_states') or {}
-                            if isinstance(next_ee_states, dict) and 'single' in next_ee_states and 'pose' in next_ee_states['single']:
-                                next_ee_pose_abs = np.array(next_ee_states['single']['pose'], dtype=np.float32)
-                                next_ee_pose_rel = _pose_rel_to(next_ee_pose_abs, base_ee_pose_abs) if (umi_mode and base_ee_pose_abs is not None) else next_ee_pose_abs
-                                next_ee_pose_with_gripper = np.append(next_ee_pose_rel, next_gripper_pos)
-                                ee_action_array.append(next_ee_pose_with_gripper)
-                            else:
-                                ee_action_array.append(np.zeros(8, dtype=np.float32))
-                    else:
-                        action_array.append(qpos)
-                        if store_ee_pose:
-                            ee_action_array.append(ee_pose_array[-1] if ee_pose_array else np.zeros(8, dtype=np.float32))
-                else:
-                    action_array.append(qpos)
-                    if store_ee_pose:
-                        ee_action_array.append(ee_pose_array[-1] if ee_pose_array else np.zeros(8, dtype=np.float32))
+                state_array.append(state)
 
                 # Process images - match configured camera_names with *_color keys (strict by default)
                 colors = point.get('colors', {}) or {}
@@ -626,33 +501,20 @@ class HDF5Loader(DataLoaderBase):
                 return False
 
         # Convert to numpy arrays
-        qpos_array = np.array(qpos_array, dtype=np.float32)
-        qvel_array = np.array(qvel_array, dtype=np.float32)
+        state_array = np.array(state_array, dtype=np.float32)
         action_array = np.array(action_array, dtype=np.float32)
-
-        if store_ee_pose and ee_pose_array:
-            ee_pose_array = np.array(ee_pose_array, dtype=np.float32)
-            ee_action_array = np.array(ee_action_array, dtype=np.float32)
 
         for cam_name in image_arrays:
             if image_arrays[cam_name]:
                 image_arrays[cam_name] = np.array(image_arrays[cam_name])
 
-        log.info(f"     📊 Arrays: qpos{qpos_array.shape}, actions{action_array.shape}")
-        if store_ee_pose and len(ee_pose_array) > 0:
-            log.info(f"     📊 EE pose: {ee_pose_array.shape}, ee_actions{ee_action_array.shape}")
+        log.info(f"     📊 Arrays: state{state_array.shape}, actions{action_array.shape}")
 
         # Save to HDF5
         try:
             with h5py.File(output_path, 'w') as f:
-                f.create_dataset('/observations/qpos', data=qpos_array)
-                f.create_dataset('/observations/qvel', data=qvel_array)
+                f.create_dataset('/observations/state', data=state_array)
                 f.create_dataset('/action', data=action_array)
-
-                # Save EE pose data if available
-                if store_ee_pose and len(ee_pose_array) > 0:
-                    f.create_dataset('/observations/ee_pose', data=ee_pose_array)
-                    f.create_dataset('/ee_action', data=ee_action_array)
 
                 for cam_name, images in image_arrays.items():
                     if len(images) > 0:
@@ -663,7 +525,6 @@ class HDF5Loader(DataLoaderBase):
                 # Metadata
                 f.attrs['sim'] = is_sim
                 f.attrs['episode_length'] = episode_len
-                f.attrs['has_ee_pose'] = store_ee_pose and len(ee_pose_array) > 0
 
             return True
 
