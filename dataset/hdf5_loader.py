@@ -79,7 +79,7 @@ class HDF5Loader(DataLoaderBase):
         log.info(f"   Skip steps: {self.skip_steps_nums}")
         log.info(f"   Camera names: {self.camera_names}")
 
-    def load_episodes(self) -> Tuple[List[int], Dict[int, Tuple[str, int]]]:
+    def load_episodes_from_hdf5(self) -> Tuple[List[int], Dict[int, Tuple[str, int]]]:
         """
         Load episode files and create episode ID mapping
 
@@ -175,14 +175,6 @@ class HDF5Loader(DataLoaderBase):
                     state = root['/observations/state'][()]
                     action = root['/action'][()]
 
-                    # Check if EE pose data is available
-                    if '/observations/ee_pose' in root and '/ee_action' in root:
-                        has_ee_pose = True
-                        ee_pose = root['/observations/ee_pose'][()]
-                        ee_action = root['/ee_action'][()]
-                        all_ee_pose_data.append(torch.from_numpy(ee_pose))
-                        all_ee_action_data.append(torch.from_numpy(ee_action))
-
                 all_state_data.append(torch.from_numpy(state))
                 all_action_data.append(torch.from_numpy(action))
             except Exception as e:
@@ -212,36 +204,6 @@ class HDF5Loader(DataLoaderBase):
             "example_state": state
         }
 
-        # Compute EE pose normalization stats if available
-        if has_ee_pose and len(all_ee_pose_data) > 0:
-            all_ee_pose_data = torch.cat(all_ee_pose_data, dim=0)
-            all_ee_action_data = torch.cat(all_ee_action_data, dim=0)
-
-            ee_pose_mean = all_ee_pose_data.mean(dim=0, keepdim=True)
-            ee_pose_std = all_ee_pose_data.std(dim=0, keepdim=True)
-            ee_pose_std = torch.clip(ee_pose_std, 1e-2, np.inf)
-
-            ee_action_mean = all_ee_action_data.mean(dim=0, keepdim=True)
-            ee_action_std = all_ee_action_data.std(dim=0, keepdim=True)
-            ee_action_std = torch.clip(ee_action_std, 1e-2, np.inf)
-
-            # Keep as tensors, not numpy
-            stats["ee_pose_mean"] = ee_pose_mean.squeeze()
-            stats["ee_pose_std"] = ee_pose_std.squeeze()
-            stats["ee_action_mean"] = ee_action_mean.squeeze()
-            stats["ee_action_std"] = ee_action_std.squeeze()
-            stats["has_ee_pose"] = True
-        else:
-            stats["has_ee_pose"] = False
-
-        # Ensure joint-control runs do not advertise EE pose stats even if they exist on disk
-        if self.control_mode != 'ee_pose' and stats.get("has_ee_pose", False):
-            stats["has_ee_pose"] = False
-            stats.pop("ee_pose_mean", None)
-            stats.pop("ee_pose_std", None)
-            stats.pop("ee_action_mean", None)
-            stats.pop("ee_action_std", None)
-
         return stats
 
     def create_dataloaders(self) -> Tuple[DataLoader, DataLoader, Dict[str, Any], bool]:
@@ -255,7 +217,7 @@ class HDF5Loader(DataLoaderBase):
             is_sim: Whether data is from simulation
         """
         # Load episodes
-        available_episode_ids, episode_id_to_dir = self.load_episodes()
+        available_episode_ids, episode_id_to_dir = self.load_episodes_from_hdf5()
 
         # Split into train/val
         train_ratio = 0.8
@@ -266,10 +228,6 @@ class HDF5Loader(DataLoaderBase):
 
         # Compute normalization stats
         norm_stats = self.compute_normalization_stats(available_episode_ids, episode_id_to_dir)
-
-        # Validate control mode availability
-        if self.control_mode == 'ee_pose' and not norm_stats.get('has_ee_pose', False):
-            raise Exception("⚠️ EE pose control mode requested but no EE pose data found in dataset!")
 
         # Create datasets
         train_dataset = EpisodicDataset(
@@ -312,7 +270,6 @@ class HDF5Loader(DataLoaderBase):
         Convert raw episode data to HDF5 format with skip_steps_nums downsampling
         Similar to lerobot_loader.py but converts to HDF5 instead of LeRobotDataset
         """
-        import cv2
         import time
         from tqdm import tqdm
 
@@ -320,8 +277,6 @@ class HDF5Loader(DataLoaderBase):
         source_dir = self._config.get('task_dir')
         output_dir = self._config.get('output_dir', self.dataset_dir)
         image_size = tuple(self._config.get('image_size', [480, 640]))
-        store_ee_pose = self._config.get('store_ee_pose', True)
-        umi_mode = self._config.get('umi_mode', False)
         is_sim = self._config.get('is_sim', False)  # Default to False for real robot data
         min_episode_len = self._config.get('min_episode_len', None)  # None = no filter
         max_episode_len = self._config.get('max_episode_len', None)  # None = no filter
@@ -331,8 +286,6 @@ class HDF5Loader(DataLoaderBase):
         log.info(f"   📁 Output: {output_dir}")
         log.info(f"   📉 Skip steps: {self.skip_steps_nums}")
         log.info(f"   🖼️  Image size: {image_size}")
-        log.info(f"   🎯 Store EE pose: {store_ee_pose}")
-        log.info(f"   🧭 UMI mode (EE relative-to-first): {umi_mode}")
 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
@@ -355,8 +308,6 @@ class HDF5Loader(DataLoaderBase):
 
         # Process each episode
         for episode_name in tqdm(episode_dirs, desc="Processing episodes", unit="episode"):
-            episode_dir = os.path.join(source_dir, episode_name)
-
             log.info(f"🔄 Processing {episode_name}...")
             
             # Load episode data via DataLoaderBase helper
@@ -386,8 +337,10 @@ class HDF5Loader(DataLoaderBase):
 
             try:
                 success = self._convert_episode_to_hdf5(
-                    data_points, episode_dir, output_path,
-                    image_size, store_ee_pose, is_sim, umi_mode
+                    data_points,
+                    output_path=output_path,
+                    image_size=image_size,
+                    is_sim=is_sim,
                 )
                 if success:
                     log.info(f"     ✅ Saved to {output_name}")
@@ -409,90 +362,90 @@ class HDF5Loader(DataLoaderBase):
 
         return total_converted
 
-    def _convert_episode_to_hdf5(self, data_points, episode_dir, output_path,
+    def _convert_episode_to_hdf5(self, data_points, output_path,
                                  image_size=(480, 640), is_sim=False):
         """
-        Convert episode data points to HDF5 format
+        Convert episode data points (already processed by DataLoaderBase) to HDF5.
 
         Args:
-            data_points: List of data points to convert
-            episode_dir: Episode directory path
-            output_path: Output HDF5 file path
-            image_size: Target image size (height, width)
-            store_ee_pose: Whether to store end-effector poses
-            is_sim: Whether data is from simulation (default: False for real robot)
-            umi_mode: Whether to use UMI mode (EE pose relative to first frame)
+            data_points: List of dicts containing colors/actions/observations.
+            output_path: Output HDF5 file path.
+            image_size: Target image size (height, width).
+            is_sim: Whether the source episodes are from simulation.
         """
         import cv2
 
-        episode_len = len(data_points)
+        if not data_points:
+            log.error("     ❌ Empty data_points passed to conversion")
+            return False
 
-        # Prepare arrays
+        primary_obs_key = None
+        primary_act_key = None
+        strict_camera = bool(self._config.get('strict_camera', True))
+
         state_array = []
         action_array = []
-        # Initialize image arrays based on configured camera names
         image_arrays = {cam_name: [] for cam_name in self.camera_names}
 
-        # Process each data point
         for i, point in enumerate(data_points):
             try:
-                # Extract joint states
-                joint_states = point.get('observations') or {}
-                positions = []
-                if isinstance(joint_states, dict) and 'single' in joint_states:
-                    positions = joint_states['single'].get('position') or []
-                if len(positions) < 7:
-                    log.warn(f"     ⚠️  Insufficient joint data at step {i}")
+                obs_dict = point.get('observations') or {}
+                act_dict = point.get('actions') or {}
+                color_dict = point.get('colors') or {}
+
+                if not obs_dict or not act_dict:
+                    log.warn(f"     ⚠️  Missing observations/actions at step {i}")
                     return False
 
-                # Extract gripper position
-                tools = point.get('tools') or {}
-                gripper_pos = 0.04  # Default
-                if isinstance(tools, dict) and 'single' in tools and isinstance(tools['single'], dict) and 'position' in tools['single']:
-                    gripper_pos = tools['single']['position']
+                if primary_obs_key is None:
+                    primary_obs_key = next(iter(obs_dict.keys()))
+                if primary_act_key is None:
+                    primary_act_key = next(iter(act_dict.keys()))
 
-                # Convert to ACT format: 8 DOF (7 joints + 1 gripper)
-                state = np.zeros(8, dtype=np.float32)
-                state[:7] = positions[:7]
-                state[7] = gripper_pos
+                obs_vec = obs_dict.get(primary_obs_key)
+                act_vec = act_dict.get(primary_act_key)
 
-                state_array.append(state)
+                if obs_vec is None or act_vec is None:
+                    log.warn(f"     ⚠️  Missing data for primary key at step {i}")
+                    return False
 
-                # Process images - match configured camera_names with *_color keys (strict by default)
-                colors = point.get('colors', {}) or {}
-                if isinstance(colors, dict):
-                    selected_images = {}
-                    missing_cams = []
-                    for cam_name in self.camera_names:
+                obs_vec = np.asarray(obs_vec, dtype=np.float32)
+                act_vec = np.asarray(act_vec, dtype=np.float32)
+
+                state_array.append(obs_vec)
+                action_array.append(act_vec)
+
+                # Process images
+                missing_cams = []
+                for cam_name in self.camera_names:
+                    img = None
+                    if cam_name in color_dict:
+                        img = color_dict[cam_name]
+                    else:
                         key_exact = f"{cam_name}_color"
-                        selected_key = None
-                        if key_exact in colors:
-                            selected_key = key_exact
+                        if key_exact in color_dict:
+                            img = color_dict[key_exact]
                         else:
-                            for k in colors.keys():
-                                if k and k.endswith('_color') and cam_name in k:
-                                    selected_key = k
+                            for key in color_dict.keys():
+                                if cam_name in key:
+                                    img = color_dict[key]
                                     break
-                        if selected_key is None or not (colors[selected_key] and 'path' in colors[selected_key]):
-                            missing_cams.append(cam_name)
-                            continue
-                        selected_images[cam_name] = os.path.join(episode_dir, colors[selected_key]['path'])
+                    if img is None:
+                        missing_cams.append(cam_name)
+                        continue
 
-                    if missing_cams:
-                        log.warn(f"     ⚠️  Missing cameras at step {i}: {missing_cams}")
-                        if bool(self._config.get('strict_camera', True)):
-                            return False
+                    img = np.asarray(img)
+                    if img.ndim != 3:
+                        log.warn(f"     ⚠️  Invalid image shape at step {i} for camera {cam_name}: {img.shape}")
+                        return False
 
-                    for cam_name, img_path in selected_images.items():
-                        try:
-                            img = cv2.imread(img_path)
-                            if img is not None:
-                                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                                if img.shape[:2] != image_size:
-                                    img = cv2.resize(img, (image_size[1], image_size[0]))
-                                image_arrays[cam_name].append(img)
-                        except Exception as e:
-                            log.warn(f"     ⚠️  Error loading {img_path}: {e}")
+                    if img.shape[:2] != image_size:
+                        img = cv2.resize(img, (image_size[1], image_size[0]))
+                    image_arrays[cam_name].append(img)
+
+                if missing_cams and strict_camera:
+                    log.warn(f"     ⚠️  Missing cameras at step {i}: {missing_cams}")
+                    return False
 
             except Exception as e:
                 log.warn(f"     ⚠️  Error processing step {i}: {e}")
@@ -500,34 +453,43 @@ class HDF5Loader(DataLoaderBase):
                 traceback.print_exc()
                 return False
 
-        # Convert to numpy arrays
-        state_array = np.array(state_array, dtype=np.float32)
-        action_array = np.array(action_array, dtype=np.float32)
+        state_array = np.asarray(state_array, dtype=np.float32)
+        action_array = np.asarray(action_array, dtype=np.float32)
 
-        for cam_name in image_arrays:
-            if image_arrays[cam_name]:
-                image_arrays[cam_name] = np.array(image_arrays[cam_name])
+        min_len = min(len(state_array), len(action_array))
+        if min_len == 0:
+            log.error("     ❌ No valid state/action pairs after processing")
+            return False
+        if len(state_array) != len(action_array):
+            log.warn(f"     ⚠️  State/action length mismatch ({len(state_array)} vs {len(action_array)}); truncating")
+            state_array = state_array[:min_len]
+            action_array = action_array[:min_len]
+
+        for cam_name, images in image_arrays.items():
+            if images:
+                image_arrays[cam_name] = np.stack(images, axis=0)
+            else:
+                image_arrays[cam_name] = np.empty((0, image_size[0], image_size[1], 3), dtype=np.uint8)
 
         log.info(f"     📊 Arrays: state{state_array.shape}, actions{action_array.shape}")
 
-        # Save to HDF5
         try:
             with h5py.File(output_path, 'w') as f:
                 f.create_dataset('/observations/state', data=state_array)
                 f.create_dataset('/action', data=action_array)
 
                 for cam_name, images in image_arrays.items():
-                    if len(images) > 0:
-                        f.create_dataset(f'/observations/images/{cam_name}',
-                                       data=images,
-                                       compression=None)
+                    if images.size > 0:
+                        f.create_dataset(
+                            f'/observations/images/{cam_name}',
+                            data=images,
+                            compression=None
+                        )
 
-                # Metadata
                 f.attrs['sim'] = is_sim
-                f.attrs['episode_length'] = episode_len
+                f.attrs['episode_length'] = len(state_array)
 
             return True
-
         except Exception as e:
             log.error(f"     ❌ HDF5 save error: {e}")
             return False
@@ -573,7 +535,6 @@ if __name__ == '__main__':
     skip_steps_nums = config.get("skip_steps_nums", 1)
     image_size_list = config.get("image_size", [480, 640])
     image_size = tuple(image_size_list)
-    store_ee_pose = config.get("store_ee_pose", True)
 
     # Convert action type and observation type strings to enums
     action_type = Action_Type_Mapping_Dict.get(action_type_str, ActionType.JOINT_POSITION)
@@ -585,8 +546,7 @@ if __name__ == '__main__':
     print(f"   Action type: {action_type_str}")
     print(f"   Obs type: {obs_type_str}")
     print(f"   Skip steps: {skip_steps_nums}")
-    print(f"   Image size: {image_size}")
-    print(f"   Store EE pose: {store_ee_pose}\n")
+    print(f"   Image size: {image_size}\n")
 
     if not task_dir or not output_dir:
         print("❌ Error: task_dir and output_dir are required in config")

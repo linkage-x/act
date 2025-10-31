@@ -26,9 +26,6 @@ image_size:
   - 480
   - 640
 
-# Store end-effector pose data during conversion
-store_ee_pose: true
-
 # Whether the data is from simulation (default: false for real robot data)
 is_sim: false
 
