@@ -79,7 +79,7 @@ class HDF5Loader(DataLoaderBase):
         log.info(f"   Skip steps: {self.skip_steps_nums}")
         log.info(f"   Camera names: {self.camera_names}")
 
-    def load_episodes(self) -> Tuple[List[int], Dict[int, Tuple[str, int]]]:
+    def load_episodes_from_hdf5(self) -> Tuple[List[int], Dict[int, Tuple[str, int]]]:
         """
         Load episode files and create episode ID mapping
 
@@ -94,7 +94,6 @@ class HDF5Loader(DataLoaderBase):
             dataset_dirs = self.dataset_dir
 
         log.info(f'\n📁 Loading data from: {dataset_dirs}')
-        log.info(f'🎯 Control mode: {self.control_mode}\n')
 
         # Get list of available episode files
         episode_files = []
@@ -127,8 +126,7 @@ class HDF5Loader(DataLoaderBase):
 
                     for idx in test_indices:
                         if idx < episode_length:
-                            _ = root['/observations/qpos'][idx]
-                            _ = root['/observations/qvel'][idx]
+                            _ = root['/observations/state'][idx]
                             if '/observations/images' in root:
                                 cam_names = list(root['/observations/images'].keys())
                                 for cam_name in cam_names:
@@ -166,37 +164,25 @@ class HDF5Loader(DataLoaderBase):
         Returns:
             Dictionary containing normalization statistics
         """
-        all_qpos_data = []
+        all_state_data = []
         all_action_data = []
-        all_ee_pose_data = []
-        all_ee_action_data = []
-
-        has_ee_pose = False
 
         for episode_id in episode_ids:
             dir_path, local_episode_id = episode_id_to_dir[episode_id]
             dataset_path = os.path.join(dir_path, f'episode_{local_episode_id}.hdf5')
             try:
                 with h5py.File(dataset_path, 'r') as root:
-                    qpos = root['/observations/qpos'][()]
+                    state = root['/observations/state'][()]
                     action = root['/action'][()]
 
-                    # Check if EE pose data is available
-                    if '/observations/ee_pose' in root and '/ee_action' in root:
-                        has_ee_pose = True
-                        ee_pose = root['/observations/ee_pose'][()]
-                        ee_action = root['/ee_action'][()]
-                        all_ee_pose_data.append(torch.from_numpy(ee_pose))
-                        all_ee_action_data.append(torch.from_numpy(ee_action))
-
-                all_qpos_data.append(torch.from_numpy(qpos))
+                all_state_data.append(torch.from_numpy(state))
                 all_action_data.append(torch.from_numpy(action))
             except Exception as e:
                 log.error(f"Skipping {dataset_path} due to error: {e}")
                 continue
 
         # Concatenate all data
-        all_qpos_data = torch.cat(all_qpos_data, dim=0)
+        all_state_data = torch.cat(all_state_data, dim=0)
         all_action_data = torch.cat(all_action_data, dim=0)
 
         # Normalize joint action data
@@ -204,49 +190,19 @@ class HDF5Loader(DataLoaderBase):
         action_std = all_action_data.std(dim=0, keepdim=True)
         action_std = torch.clip(action_std, 1e-2, np.inf)
 
-        # Normalize qpos data
-        qpos_mean = all_qpos_data.mean(dim=0, keepdim=True)
-        qpos_std = all_qpos_data.std(dim=0, keepdim=True)
-        qpos_std = torch.clip(qpos_std, 1e-2, np.inf)
+        # Normalize state data
+        state_mean = all_state_data.mean(dim=0, keepdim=True)
+        state_std = all_state_data.std(dim=0, keepdim=True)
+        state_std = torch.clip(state_std, 1e-2, np.inf)
 
         # Keep stats as torch tensors for compatibility with EpisodicDataset
         stats = {
             "action_mean": action_mean.squeeze(),
             "action_std": action_std.squeeze(),
-            "qpos_mean": qpos_mean.squeeze(),
-            "qpos_std": qpos_std.squeeze(),
-            "example_qpos": qpos
+            "state_mean": state_mean.squeeze(),
+            "state_std": state_std.squeeze(),
+            "example_state": state
         }
-
-        # Compute EE pose normalization stats if available
-        if has_ee_pose and len(all_ee_pose_data) > 0:
-            all_ee_pose_data = torch.cat(all_ee_pose_data, dim=0)
-            all_ee_action_data = torch.cat(all_ee_action_data, dim=0)
-
-            ee_pose_mean = all_ee_pose_data.mean(dim=0, keepdim=True)
-            ee_pose_std = all_ee_pose_data.std(dim=0, keepdim=True)
-            ee_pose_std = torch.clip(ee_pose_std, 1e-2, np.inf)
-
-            ee_action_mean = all_ee_action_data.mean(dim=0, keepdim=True)
-            ee_action_std = all_ee_action_data.std(dim=0, keepdim=True)
-            ee_action_std = torch.clip(ee_action_std, 1e-2, np.inf)
-
-            # Keep as tensors, not numpy
-            stats["ee_pose_mean"] = ee_pose_mean.squeeze()
-            stats["ee_pose_std"] = ee_pose_std.squeeze()
-            stats["ee_action_mean"] = ee_action_mean.squeeze()
-            stats["ee_action_std"] = ee_action_std.squeeze()
-            stats["has_ee_pose"] = True
-        else:
-            stats["has_ee_pose"] = False
-
-        # Ensure joint-control runs do not advertise EE pose stats even if they exist on disk
-        if self.control_mode != 'ee_pose' and stats.get("has_ee_pose", False):
-            stats["has_ee_pose"] = False
-            stats.pop("ee_pose_mean", None)
-            stats.pop("ee_pose_std", None)
-            stats.pop("ee_action_mean", None)
-            stats.pop("ee_action_std", None)
 
         return stats
 
@@ -261,7 +217,7 @@ class HDF5Loader(DataLoaderBase):
             is_sim: Whether data is from simulation
         """
         # Load episodes
-        available_episode_ids, episode_id_to_dir = self.load_episodes()
+        available_episode_ids, episode_id_to_dir = self.load_episodes_from_hdf5()
 
         # Split into train/val
         train_ratio = 0.8
@@ -272,10 +228,6 @@ class HDF5Loader(DataLoaderBase):
 
         # Compute normalization stats
         norm_stats = self.compute_normalization_stats(available_episode_ids, episode_id_to_dir)
-
-        # Validate control mode availability
-        if self.control_mode == 'ee_pose' and not norm_stats.get('has_ee_pose', False):
-            raise Exception("⚠️ EE pose control mode requested but no EE pose data found in dataset!")
 
         # Create datasets
         train_dataset = EpisodicDataset(
@@ -318,8 +270,6 @@ class HDF5Loader(DataLoaderBase):
         Convert raw episode data to HDF5 format with skip_steps_nums downsampling
         Similar to lerobot_loader.py but converts to HDF5 instead of LeRobotDataset
         """
-        import json
-        import cv2
         import time
         from tqdm import tqdm
 
@@ -327,8 +277,6 @@ class HDF5Loader(DataLoaderBase):
         source_dir = self._config.get('task_dir')
         output_dir = self._config.get('output_dir', self.dataset_dir)
         image_size = tuple(self._config.get('image_size', [480, 640]))
-        store_ee_pose = self._config.get('store_ee_pose', True)
-        umi_mode = self._config.get('umi_mode', False)
         is_sim = self._config.get('is_sim', False)  # Default to False for real robot data
         min_episode_len = self._config.get('min_episode_len', None)  # None = no filter
         max_episode_len = self._config.get('max_episode_len', None)  # None = no filter
@@ -338,8 +286,6 @@ class HDF5Loader(DataLoaderBase):
         log.info(f"   📁 Output: {output_dir}")
         log.info(f"   📉 Skip steps: {self.skip_steps_nums}")
         log.info(f"   🖼️  Image size: {image_size}")
-        log.info(f"   🎯 Store EE pose: {store_ee_pose}")
-        log.info(f"   🧭 UMI mode (EE relative-to-first): {umi_mode}")
 
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
@@ -362,20 +308,11 @@ class HDF5Loader(DataLoaderBase):
 
         # Process each episode
         for episode_name in tqdm(episode_dirs, desc="Processing episodes", unit="episode"):
-            episode_dir = os.path.join(source_dir, episode_name)
-
             log.info(f"🔄 Processing {episode_name}...")
-
-            # Load episode data
-            data_file = os.path.join(episode_dir, 'data.json')
-            if not os.path.exists(data_file):
-                log.error(f"   ❌ No data.json found in {episode_dir}")
-                continue
-
-            with open(data_file, 'r') as f:
-                episode_data = json.load(f)
-
-            data_points = episode_data.get('data', [])
+            
+            # Load episode data via DataLoaderBase helper
+            episode_data, _ = self.load_episode(source_dir, episode_name, self.skip_steps_nums)
+            data_points = episode_data or []
             if not data_points:
                 log.error(f"   ❌ No data points found in {episode_name}")
                 continue
@@ -391,11 +328,6 @@ class HDF5Loader(DataLoaderBase):
                 log.warn(f"   ⚠️  Episode too long ({original_len} > {max_episode_len} steps), PASS...")
                 continue
 
-            # Apply skip_steps_nums downsampling (like lerobot_loader)
-            if self.skip_steps_nums > 1:
-                data_points = data_points[::self.skip_steps_nums]
-                log.info(f"   📉 After skip_steps_nums={self.skip_steps_nums}: {len(data_points)} steps")
-
             # Convert to HDF5
             output_name = f"episode_{global_counter[0]}.hdf5"
             global_counter[0] += 1
@@ -405,8 +337,10 @@ class HDF5Loader(DataLoaderBase):
 
             try:
                 success = self._convert_episode_to_hdf5(
-                    data_points, episode_dir, output_path,
-                    image_size, store_ee_pose, is_sim, umi_mode
+                    data_points,
+                    output_path=output_path,
+                    image_size=image_size,
+                    is_sim=is_sim,
                 )
                 if success:
                     log.info(f"     ✅ Saved to {output_name}")
@@ -428,196 +362,90 @@ class HDF5Loader(DataLoaderBase):
 
         return total_converted
 
-    def _convert_episode_to_hdf5(self, data_points, episode_dir, output_path,
-                                 image_size=(480, 640), store_ee_pose=True, is_sim=False, umi_mode=False):
+    def _convert_episode_to_hdf5(self, data_points, output_path,
+                                 image_size=(480, 640), is_sim=False):
         """
-        Convert episode data points to HDF5 format
+        Convert episode data points (already processed by DataLoaderBase) to HDF5.
 
         Args:
-            data_points: List of data points to convert
-            episode_dir: Episode directory path
-            output_path: Output HDF5 file path
-            image_size: Target image size (height, width)
-            store_ee_pose: Whether to store end-effector poses
-            is_sim: Whether data is from simulation (default: False for real robot)
-            umi_mode: Whether to use UMI mode (EE pose relative to first frame)
+            data_points: List of dicts containing colors/actions/observations.
+            output_path: Output HDF5 file path.
+            image_size: Target image size (height, width).
+            is_sim: Whether the source episodes are from simulation.
         """
         import cv2
 
-        episode_len = len(data_points)
+        if not data_points:
+            log.error("     ❌ Empty data_points passed to conversion")
+            return False
 
-        # ---- UMI helpers: pose math (quaternion [qx,qy,qz,qw]) ----
-        def _quat_normalize(q):
-            q = np.asarray(q, dtype=np.float32)
-            n = np.linalg.norm(q)
-            if n < 1e-8:
-                return np.array([0, 0, 0, 1], dtype=np.float32)
-            return q / n
+        primary_obs_key = None
+        primary_act_key = None
+        strict_camera = bool(self._config.get('strict_camera', True))
 
-        def _quat_mul(q1, q2):
-            x1, y1, z1, w1 = q1
-            x2, y2, z2, w2 = q2
-            x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-            y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-            z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-            w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-            return _quat_normalize(np.array([x, y, z, w], dtype=np.float32))
-
-        def _quat_inv(q):
-            x, y, z, w = q
-            return _quat_normalize(np.array([-x, -y, -z, w], dtype=np.float32))
-
-        def _quat_apply(q, v):
-            q_vec = q[:3]
-            w = q[3]
-            t = 2.0 * np.cross(q_vec, v)
-            return v + w * t + np.cross(q_vec, t)
-
-        def _pose_rel_to(pose_abs, base_abs):
-            p = np.asarray(pose_abs[:3], dtype=np.float32)
-            q = _quat_normalize(np.asarray(pose_abs[3:], dtype=np.float32))
-            p0 = np.asarray(base_abs[:3], dtype=np.float32)
-            q0 = _quat_normalize(np.asarray(base_abs[3:], dtype=np.float32))
-            q0_inv = _quat_inv(q0)
-            dp = _quat_apply(q0_inv, (p - p0))
-            dq = _quat_mul(q0_inv, q)
-            return np.concatenate([dp, dq], dtype=np.float32)
-
-        # Find base EE pose for UMI (first valid)
-        base_ee_pose_abs = None
-        if umi_mode and store_ee_pose:
-            for _pt in data_points:
-                es = _pt.get('ee_states', {})
-                if 'single' in es and 'pose' in es['single']:
-                    base_ee_pose_abs = np.array(es['single']['pose'], dtype=np.float32)
-                    break
-
-        # Prepare arrays
-        qpos_array = []
-        qvel_array = []
+        state_array = []
         action_array = []
-        ee_pose_array = []
-        ee_action_array = []
-        # Initialize image arrays based on configured camera names
         image_arrays = {cam_name: [] for cam_name in self.camera_names}
 
-        # Process each data point
         for i, point in enumerate(data_points):
             try:
-                # Extract joint states
-                joint_states = point.get('joint_states') or {}
-                positions = []
-                velocities = []
-                if isinstance(joint_states, dict) and 'single' in joint_states:
-                    positions = joint_states['single'].get('position') or []
-                    velocities = joint_states['single'].get('velocity') or []
-                if (not positions or not velocities) and umi_mode:
-                    # UMI数据可能无关节，使用零填充
-                    positions = [0.0] * 7
-                    velocities = [0.0] * 7
-                if len(positions) < 7 or len(velocities) < 7:
-                    log.warn(f"     ⚠️  Insufficient joint data at step {i}")
+                obs_dict = point.get('observations') or {}
+                act_dict = point.get('actions') or {}
+                color_dict = point.get('colors') or {}
+
+                if not obs_dict or not act_dict:
+                    log.warn(f"     ⚠️  Missing observations/actions at step {i}")
                     return False
 
-                # Extract gripper position
-                tools = point.get('tools') or {}
-                gripper_pos = 0.04  # Default
-                if isinstance(tools, dict) and 'single' in tools and isinstance(tools['single'], dict) and 'position' in tools['single']:
-                    gripper_pos = tools['single']['position']
+                if primary_obs_key is None:
+                    primary_obs_key = next(iter(obs_dict.keys()))
+                if primary_act_key is None:
+                    primary_act_key = next(iter(act_dict.keys()))
 
-                # Convert to ACT format: 8 DOF (7 joints + 1 gripper)
-                qpos = np.zeros(8, dtype=np.float32)
-                qvel = np.zeros(8, dtype=np.float32)
-                qpos[:7] = positions[:7]
-                qvel[:7] = velocities[:7]
-                qpos[7] = gripper_pos
-                qvel[7] = 0.0
+                obs_vec = obs_dict.get(primary_obs_key)
+                act_vec = act_dict.get(primary_act_key)
 
-                qpos_array.append(qpos)
-                qvel_array.append(qvel)
+                if obs_vec is None or act_vec is None:
+                    log.warn(f"     ⚠️  Missing data for primary key at step {i}")
+                    return False
 
-                # Extract EE pose if available
-                if store_ee_pose:
-                    ee_states = point.get('ee_states') or {}
-                    if isinstance(ee_states, dict) and 'single' in ee_states and 'pose' in ee_states['single']:
-                        # EE pose (absolute) → relative if UMI
-                        ee_pose_abs = np.array(ee_states['single']['pose'], dtype=np.float32)
-                        ee_pose_rel = _pose_rel_to(ee_pose_abs, base_ee_pose_abs) if (umi_mode and base_ee_pose_abs is not None) else ee_pose_abs
-                        ee_pose_with_gripper = np.append(ee_pose_rel, gripper_pos)
-                        ee_pose_array.append(ee_pose_with_gripper)
+                obs_vec = np.asarray(obs_vec, dtype=np.float32)
+                act_vec = np.asarray(act_vec, dtype=np.float32)
+
+                state_array.append(obs_vec)
+                action_array.append(act_vec)
+
+                # Process images
+                missing_cams = []
+                for cam_name in self.camera_names:
+                    img = None
+                    if cam_name in color_dict:
+                        img = color_dict[cam_name]
                     else:
-                        ee_pose_array.append(np.zeros(8, dtype=np.float32))
-
-                # Actions (use next state as action, or current for last step)
-                if i < episode_len - 1:
-                    next_point = data_points[i + 1]
-                    next_joint_states = next_point.get('joint_states') or {}
-                    if isinstance(next_joint_states, dict) and 'single' in next_joint_states:
-                        next_positions = next_joint_states['single'].get('position', positions) or positions
-                        next_tools = next_point.get('tools') or {}
-                        next_gripper_pos = gripper_pos
-                        if isinstance(next_tools, dict) and 'single' in next_tools and isinstance(next_tools['single'], dict) and 'position' in next_tools['single']:
-                            next_gripper_pos = next_tools['single']['position']
-
-                        action_qpos = np.zeros(8, dtype=np.float32)
-                        action_qpos[:7] = next_positions[:7]
-                        action_qpos[7] = next_gripper_pos
-                        action_array.append(action_qpos)
-
-                        # EE pose action
-                        if store_ee_pose:
-                            next_ee_states = next_point.get('ee_states') or {}
-                            if isinstance(next_ee_states, dict) and 'single' in next_ee_states and 'pose' in next_ee_states['single']:
-                                next_ee_pose_abs = np.array(next_ee_states['single']['pose'], dtype=np.float32)
-                                next_ee_pose_rel = _pose_rel_to(next_ee_pose_abs, base_ee_pose_abs) if (umi_mode and base_ee_pose_abs is not None) else next_ee_pose_abs
-                                next_ee_pose_with_gripper = np.append(next_ee_pose_rel, next_gripper_pos)
-                                ee_action_array.append(next_ee_pose_with_gripper)
-                            else:
-                                ee_action_array.append(np.zeros(8, dtype=np.float32))
-                    else:
-                        action_array.append(qpos)
-                        if store_ee_pose:
-                            ee_action_array.append(ee_pose_array[-1] if ee_pose_array else np.zeros(8, dtype=np.float32))
-                else:
-                    action_array.append(qpos)
-                    if store_ee_pose:
-                        ee_action_array.append(ee_pose_array[-1] if ee_pose_array else np.zeros(8, dtype=np.float32))
-
-                # Process images - match configured camera_names with *_color keys (strict by default)
-                colors = point.get('colors', {}) or {}
-                if isinstance(colors, dict):
-                    selected_images = {}
-                    missing_cams = []
-                    for cam_name in self.camera_names:
                         key_exact = f"{cam_name}_color"
-                        selected_key = None
-                        if key_exact in colors:
-                            selected_key = key_exact
+                        if key_exact in color_dict:
+                            img = color_dict[key_exact]
                         else:
-                            for k in colors.keys():
-                                if k and k.endswith('_color') and cam_name in k:
-                                    selected_key = k
+                            for key in color_dict.keys():
+                                if cam_name in key:
+                                    img = color_dict[key]
                                     break
-                        if selected_key is None or not (colors[selected_key] and 'path' in colors[selected_key]):
-                            missing_cams.append(cam_name)
-                            continue
-                        selected_images[cam_name] = os.path.join(episode_dir, colors[selected_key]['path'])
+                    if img is None:
+                        missing_cams.append(cam_name)
+                        continue
 
-                    if missing_cams:
-                        log.warn(f"     ⚠️  Missing cameras at step {i}: {missing_cams}")
-                        if bool(self._config.get('strict_camera', True)):
-                            return False
+                    img = np.asarray(img)
+                    if img.ndim != 3:
+                        log.warn(f"     ⚠️  Invalid image shape at step {i} for camera {cam_name}: {img.shape}")
+                        return False
 
-                    for cam_name, img_path in selected_images.items():
-                        try:
-                            img = cv2.imread(img_path)
-                            if img is not None:
-                                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                                if img.shape[:2] != image_size:
-                                    img = cv2.resize(img, (image_size[1], image_size[0]))
-                                image_arrays[cam_name].append(img)
-                        except Exception as e:
-                            log.warn(f"     ⚠️  Error loading {img_path}: {e}")
+                    if img.shape[:2] != image_size:
+                        img = cv2.resize(img, (image_size[1], image_size[0]))
+                    image_arrays[cam_name].append(img)
+
+                if missing_cams and strict_camera:
+                    log.warn(f"     ⚠️  Missing cameras at step {i}: {missing_cams}")
+                    return False
 
             except Exception as e:
                 log.warn(f"     ⚠️  Error processing step {i}: {e}")
@@ -625,48 +453,43 @@ class HDF5Loader(DataLoaderBase):
                 traceback.print_exc()
                 return False
 
-        # Convert to numpy arrays
-        qpos_array = np.array(qpos_array, dtype=np.float32)
-        qvel_array = np.array(qvel_array, dtype=np.float32)
-        action_array = np.array(action_array, dtype=np.float32)
+        state_array = np.asarray(state_array, dtype=np.float32)
+        action_array = np.asarray(action_array, dtype=np.float32)
 
-        if store_ee_pose and ee_pose_array:
-            ee_pose_array = np.array(ee_pose_array, dtype=np.float32)
-            ee_action_array = np.array(ee_action_array, dtype=np.float32)
+        min_len = min(len(state_array), len(action_array))
+        if min_len == 0:
+            log.error("     ❌ No valid state/action pairs after processing")
+            return False
+        if len(state_array) != len(action_array):
+            log.warn(f"     ⚠️  State/action length mismatch ({len(state_array)} vs {len(action_array)}); truncating")
+            state_array = state_array[:min_len]
+            action_array = action_array[:min_len]
 
-        for cam_name in image_arrays:
-            if image_arrays[cam_name]:
-                image_arrays[cam_name] = np.array(image_arrays[cam_name])
+        for cam_name, images in image_arrays.items():
+            if images:
+                image_arrays[cam_name] = np.stack(images, axis=0)
+            else:
+                image_arrays[cam_name] = np.empty((0, image_size[0], image_size[1], 3), dtype=np.uint8)
 
-        log.info(f"     📊 Arrays: qpos{qpos_array.shape}, actions{action_array.shape}")
-        if store_ee_pose and len(ee_pose_array) > 0:
-            log.info(f"     📊 EE pose: {ee_pose_array.shape}, ee_actions{ee_action_array.shape}")
+        log.info(f"     📊 Arrays: state{state_array.shape}, actions{action_array.shape}")
 
-        # Save to HDF5
         try:
             with h5py.File(output_path, 'w') as f:
-                f.create_dataset('/observations/qpos', data=qpos_array)
-                f.create_dataset('/observations/qvel', data=qvel_array)
+                f.create_dataset('/observations/state', data=state_array)
                 f.create_dataset('/action', data=action_array)
 
-                # Save EE pose data if available
-                if store_ee_pose and len(ee_pose_array) > 0:
-                    f.create_dataset('/observations/ee_pose', data=ee_pose_array)
-                    f.create_dataset('/ee_action', data=ee_action_array)
-
                 for cam_name, images in image_arrays.items():
-                    if len(images) > 0:
-                        f.create_dataset(f'/observations/images/{cam_name}',
-                                       data=images,
-                                       compression=None)
+                    if images.size > 0:
+                        f.create_dataset(
+                            f'/observations/images/{cam_name}',
+                            data=images,
+                            compression=None
+                        )
 
-                # Metadata
                 f.attrs['sim'] = is_sim
-                f.attrs['episode_length'] = episode_len
-                f.attrs['has_ee_pose'] = store_ee_pose and len(ee_pose_array) > 0
+                f.attrs['episode_length'] = len(state_array)
 
             return True
-
         except Exception as e:
             log.error(f"     ❌ HDF5 save error: {e}")
             return False
@@ -712,7 +535,6 @@ if __name__ == '__main__':
     skip_steps_nums = config.get("skip_steps_nums", 1)
     image_size_list = config.get("image_size", [480, 640])
     image_size = tuple(image_size_list)
-    store_ee_pose = config.get("store_ee_pose", True)
 
     # Convert action type and observation type strings to enums
     action_type = Action_Type_Mapping_Dict.get(action_type_str, ActionType.JOINT_POSITION)
@@ -724,8 +546,7 @@ if __name__ == '__main__':
     print(f"   Action type: {action_type_str}")
     print(f"   Obs type: {obs_type_str}")
     print(f"   Skip steps: {skip_steps_nums}")
-    print(f"   Image size: {image_size}")
-    print(f"   Store EE pose: {store_ee_pose}\n")
+    print(f"   Image size: {image_size}\n")
 
     if not task_dir or not output_dir:
         print("❌ Error: task_dir and output_dir are required in config")

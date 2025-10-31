@@ -79,8 +79,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                     test_indices = [0, episode_length // 2, episode_length - 1]
                     for idx in test_indices:
                         if idx < episode_length:
-                            _ = root['/observations/qpos'][idx]
-                            _ = root['/observations/qvel'][idx]
+                            _ = root['/observations/state'][idx]
                             for cam_name in self.camera_names:
                                 if f'/observations/images/{cam_name}' in root:
                                     _ = root[f'/observations/images/{cam_name}'][idx]
@@ -121,12 +120,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 start_ts = np.random.choice(episode_len)
 
             # Load observations at start_ts
-            qpos = root['/observations/qpos'][start_ts]
-
-            # Load EE pose if using EE pose control mode
-            ee_pose = None
-            if self.control_mode == 'ee_pose' and '/observations/ee_pose' in root:
-                ee_pose = root['/observations/ee_pose'][start_ts]
+            state = root['/observations/state'][start_ts]
 
             # Load images
             image_dict = dict()
@@ -138,39 +132,25 @@ class EpisodicDataset(torch.utils.data.Dataset):
             if is_sim:
                 action = root['/action'][start_ts:]
                 action_len = episode_len - start_ts
-
-                ee_action = None
-                if self.control_mode == 'ee_pose' and '/ee_action' in root:
-                    ee_action = root['/ee_action'][start_ts:]
             else:
                 # Hack for real robot: start from one timestep earlier for alignment
                 action = root['/action'][max(0, start_ts - 1):]
                 action_len = episode_len - max(0, start_ts - 1)
-
-                ee_action = None
-                if self.control_mode == 'ee_pose' and '/ee_action' in root:
-                    ee_action = root['/ee_action'][max(0, start_ts - 1):]
 
         self.is_sim = is_sim
 
         # Pad actions to target length
         target_len = self.episode_len
 
-        # Choose action data based on control mode
-        if self.control_mode == 'ee_pose' and ee_action is not None:
-            action_to_use = ee_action
-        else:
-            action_to_use = action
-
-        padded_action = np.zeros((target_len, action_to_use.shape[1]), dtype=np.float32)
+        padded_action = np.zeros((target_len, action.shape[1]), dtype=np.float32)
         actual_action_len = min(action_len, target_len)
 
         if actual_action_len > 0:
-            padded_action[:actual_action_len] = action_to_use[:actual_action_len]
+            padded_action[:actual_action_len] = action[:actual_action_len]
 
             # Pad with last frame if insufficient data
             if action_len < target_len and action_len > 0:
-                last_frame = action_to_use[-1]
+                last_frame = action[-1]
                 for i in range(action_len, target_len):
                     padded_action[i] = last_frame
 
@@ -190,10 +170,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         image_data = torch.from_numpy(all_cam_images)
 
         # Use EE pose or joint positions based on control mode
-        if self.control_mode == 'ee_pose' and ee_pose is not None:
-            qpos_data = torch.from_numpy(ee_pose).float()
-        else:
-            qpos_data = torch.from_numpy(qpos).float()
+        state_data = torch.from_numpy(state).float()
 
         action_data = torch.from_numpy(padded_action).float()
         is_pad = torch.from_numpy(is_pad).bool()
@@ -208,12 +185,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         if self.augmentation_fn is not None:
             image_data = self.augmentation_fn(image_data)
 
-        # Normalize actions and qpos based on control mode
-        if self.control_mode == 'ee_pose':
-            action_data = (action_data - self.norm_stats["ee_action_mean"]) / self.norm_stats["ee_action_std"]
-            qpos_data = (qpos_data - self.norm_stats["ee_pose_mean"]) / self.norm_stats["ee_pose_std"]
-        else:
-            action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
-            qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
+        action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
+        state_data = (state_data - self.norm_stats["state_mean"]) / self.norm_stats["state_std"]
 
-        return image_data, qpos_data, action_data, is_pad
+        return image_data, state_data, action_data, is_pad

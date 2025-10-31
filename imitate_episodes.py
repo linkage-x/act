@@ -48,7 +48,7 @@ def main(args):
     num_epochs = args['num_epochs']
 
     # get task parameters from YAML only (no SIM_TASK_CONFIGS fallback)
-    is_sim = task_name[:4] == 'sim_' or task_name.startswith('fr3_') or task_name.startswith('monte01_')
+    is_sim = task_name[:4] == 'sim_' or task_name.startswith('fr3_')
     task_config = args.get('_task_config')
     if task_config is None:
         raise KeyError(
@@ -60,8 +60,7 @@ def main(args):
     episode_len = task_config['episode_len']
     camera_names = task_config['camera_names']
 
-    # get state dimension from task config or default to 14
-    state_dim = task_config.get('state_dim', 14)
+    state_dim = task_config.get('state_dim', 8)
 
     # Derive obs->action pair from ckpt_dir suffix, e.g., *_ee2ee, *_q2q
     # Supported keys: 'ee' (end-effector pose), 'q' (joint position)
@@ -83,7 +82,6 @@ def main(args):
         print(f"Using ee2ee mode inferred from ckpt_dir, state_dim set to {state_dim}")
     elif obs_key == 'q' and act_key == 'q':
         # Joint position mode: use state_dim from task config (default: 8 for FR3)
-        # state_dim already set from task_config above (line 70)
         print(f"Using q2q (joint position) mode inferred from ckpt_dir, state_dim = {state_dim}")
     else:
         # Mixed modes (ee2q or q2ee) require dataset/model changes; guard for now
@@ -316,7 +314,7 @@ def train_bc(train_dataloader, val_dataloader, config):
         policy.train()
         optimizer.zero_grad()
         train_epoch_dicts = []  # Per-epoch accumulator
-        for batch_idx, data in enumerate(train_dataloader):
+        for _, data in enumerate(train_dataloader):
             forward_dict = forward_pass(data, policy, device)
             # backward
             loss = forward_dict['loss']
