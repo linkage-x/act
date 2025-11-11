@@ -13,7 +13,7 @@ data:
   num_episodes: 56
 
 training:
-  ckpt_dir: ckpts/fr3_ip_1030_56ep
+  ckpt_dir: ckpts/fr3_ip_1030_56ep_dee2dee
   batch_size: 64
   num_epochs: 8000
   lr: 5e-5
