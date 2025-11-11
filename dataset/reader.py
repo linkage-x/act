@@ -32,6 +32,19 @@ Action_Type_Mapping_Dict = {
     "command_end_effector_pose": ActionType.COMMAND_END_EFFECTOR_POSE
 }
 
+# String-to-enum mapping for observation types (tolerate historic typos)
+Observation_Type_Mapping_Dict = {
+    # canonical keys
+    "joint_position_only": ObservationType.JOINT_POSITION_ONLY,
+    "end_effector_pose": ObservationType.END_EFFECTOR_POSE,
+    "delta_ee_pose": ObservationType.DELTA_END_EFFECTOR_POSE,
+    "joint_position_ee_pose": ObservationType.JOINT_POSITION_END_EFFECTOR,
+    "mask": ObservationType.MASK,
+    # backward-compatibility (typos present in earlier code)
+    "jonit_position": ObservationType.JOINT_POSITION_ONLY,
+    "jonit_position_ee_pose": ObservationType.JOINT_POSITION_END_EFFECTOR,
+}
+
 class RerunEpisodeReader:
     def __init__(self, task_dir = ".", json_file="data.json", 
                  action_type: ActionType = ActionType.JOINT_POSITION,
