@@ -62,9 +62,12 @@ def main(args):
 
     state_dim = task_config.get('state_dim', 8)
 
-    # Derive obs->action pair from ckpt_dir suffix, e.g., *_ee2ee, *_q2q
-    # Supported keys: 'ee' (end-effector pose), 'q' (joint position)
-    pair_match = re.search(r'(ee|q)2(ee|q)(?![a-zA-Z0-9])', ckpt_dir)
+    # Derive obs->action pair from ckpt_dir suffix, e.g., *_ee2ee, *_dee2dee, *_q2q
+    # Supported tokens:
+    #   - ee  : end-effector absolute pose
+    #   - dee : delta end-effector pose
+    #   - q   : joint position
+    pair_match = re.search(r'(dee|ee|q)2(dee|ee|q)(?![a-zA-Z0-9])', ckpt_dir)
     if pair_match:
         obs_key, act_key = pair_match.group(1), pair_match.group(2)
     else:
@@ -72,14 +75,25 @@ def main(args):
         obs_key, act_key = 'q', 'q'
 
     # Map to enums
-    obs_type_from_suffix = ObservationType.END_EFFECTOR_POSE if obs_key == 'ee' else ObservationType.JOINT_POSITION_ONLY
-    action_type_from_suffix = ActionType.END_EFFECTOR_POSE if act_key == 'ee' else ActionType.JOINT_POSITION
+    if obs_key == 'dee':
+        obs_type_from_suffix = ObservationType.DELTA_END_EFFECTOR_POSE
+    elif obs_key == 'ee':
+        obs_type_from_suffix = ObservationType.END_EFFECTOR_POSE
+    else:
+        obs_type_from_suffix = ObservationType.JOINT_POSITION_ONLY
+
+    if act_key == 'dee':
+        action_type_from_suffix = ActionType.END_EFFECTOR_POSE_DELTA
+    elif act_key == 'ee':
+        action_type_from_suffix = ActionType.END_EFFECTOR_POSE
+    else:
+        action_type_from_suffix = ActionType.JOINT_POSITION
 
     # Control mode controls how dataset constructs (obs, action)
-    if obs_key == 'ee' and act_key == 'ee':
-        # EE pose: [x, y, z, qx, qy, qz, qw, gripper] = 8 dimensions
+    if (obs_key, act_key) in (('ee','ee'), ('dee','dee')):
+        # EE pose (absolute or delta): [x, y, z, qx, qy, qz, qw, gripper] = 8 dimensions
         state_dim = 8
-        print(f"Using ee2ee mode inferred from ckpt_dir, state_dim set to {state_dim}")
+        print(f"Using {'dee2dee' if obs_key=='dee' else 'ee2ee'} mode inferred from ckpt_dir, state_dim set to {state_dim}")
     elif obs_key == 'q' and act_key == 'q':
         # Joint position mode: use state_dim from task config (default: 8 for FR3)
         print(f"Using q2q (joint position) mode inferred from ckpt_dir, state_dim = {state_dim}")

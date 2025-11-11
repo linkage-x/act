@@ -50,12 +50,17 @@ class HDF5Loader(DataLoaderBase):
 
         # Determine control mode from action_type and observation_type
         # Support ee_pose if either action or observation uses EE pose
-        if (action_type == ActionType.END_EFFECTOR_POSE or
-            observation_type == ObservationType.END_EFFECTOR_POSE or
-            observation_type == ObservationType.JOINT_POSITION_END_EFFECTOR):
+        if (action_type in (ActionType.END_EFFECTOR_POSE, ActionType.END_EFFECTOR_POSE_DELTA) or
+            observation_type in (ObservationType.END_EFFECTOR_POSE, ObservationType.DELTA_END_EFFECTOR_POSE, ObservationType.JOINT_POSITION_END_EFFECTOR)):
             self.control_mode = 'ee_pose'
         else:
             self.control_mode = 'joint'
+
+        # Whether to use delta EE mode (dee2dee)
+        self.ee_delta = (
+            action_type == ActionType.END_EFFECTOR_POSE_DELTA or
+            observation_type == ObservationType.DELTA_END_EFFECTOR_POSE
+        )
 
         # Data loading parameters
         self.num_episodes = config.get('num_episodes', None)
@@ -172,8 +177,29 @@ class HDF5Loader(DataLoaderBase):
             dataset_path = os.path.join(dir_path, f'episode_{local_episode_id}.hdf5')
             try:
                 with h5py.File(dataset_path, 'r') as root:
-                    state = root['/observations/state'][()]
-                    action = root['/action'][()]
+                    # State stats: prefer EE pose for ee modes; delta if requested
+                    if self.control_mode == 'ee_pose' and '/observations/ee_pose' in root:
+                        sraw = root['/observations/ee_pose'][()]
+                        if self.ee_delta and sraw.shape[0] > 1:
+                            sdiff = np.zeros_like(sraw)
+                            sdiff[1:] = sraw[1:] - sraw[:-1]
+                            state = sdiff
+                        else:
+                            state = sraw
+                    else:
+                        state = root['/observations/state'][()]
+
+                    # Action stats: prefer EE action; delta if requested
+                    if self.control_mode == 'ee_pose' and '/ee_action' in root:
+                        araw = root['/ee_action'][()]
+                        if self.ee_delta and araw.shape[0] > 1:
+                            adiff = np.zeros_like(araw)
+                            adiff[1:] = araw[1:] - araw[:-1]
+                            action = adiff
+                        else:
+                            action = araw
+                    else:
+                        action = root['/action'][()]
 
                 all_state_data.append(torch.from_numpy(state))
                 all_action_data.append(torch.from_numpy(action))
@@ -185,7 +211,7 @@ class HDF5Loader(DataLoaderBase):
         all_state_data = torch.cat(all_state_data, dim=0)
         all_action_data = torch.cat(all_action_data, dim=0)
 
-        # Normalize joint action data
+        # Normalize action data (joint or EE-delta depending on control_mode)
         action_mean = all_action_data.mean(dim=0, keepdim=True)
         action_std = all_action_data.std(dim=0, keepdim=True)
         action_std = torch.clip(action_std, 1e-2, np.inf)
@@ -232,11 +258,11 @@ class HDF5Loader(DataLoaderBase):
         # Create datasets
         train_dataset = EpisodicDataset(
             train_episode_ids, episode_id_to_dir, self.camera_names,
-            norm_stats, self.episode_len, self.augmentation_config, self.control_mode
+            norm_stats, self.episode_len, self.augmentation_config, self.control_mode, ee_delta=self.ee_delta
         )
         val_dataset = EpisodicDataset(
             val_episode_ids, episode_id_to_dir, self.camera_names,
-            norm_stats, self.episode_len, None, self.control_mode  # No augmentation for validation
+            norm_stats, self.episode_len, None, self.control_mode, ee_delta=self.ee_delta  # No augmentation for validation
         )
 
         # Create dataloaders
