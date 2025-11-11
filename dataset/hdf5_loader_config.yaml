@@ -4,7 +4,7 @@
 task_dir: "/data/fr3/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep"
 
 # Output directory (for convert mode: where to save HDF5 files)
-output_dir: "/data/fr3_hdf5/fr3_hdf5/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep_hdf5"
+output_dir: "/data/fr3_hdf5/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep_hdf5"
 
 # Action type: "joint_position" or "end_effector_pose"
 action_type: "end_effector_pose_delta"
