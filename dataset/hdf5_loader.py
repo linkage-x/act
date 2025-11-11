@@ -387,6 +387,10 @@ class HDF5Loader(DataLoaderBase):
 
         strict_camera = bool(self._config.get('strict_camera', True))
 
+        # Read types to decide whether to append gripper state at the end
+        obs_type_str = str(self._config.get('obs_type', 'joint_position_only')).lower()
+        act_type_str = str(self._config.get('action_type', 'joint_position')).lower()
+
         state_array = []
         action_array = []
         image_arrays = {cam_name: [] for cam_name in self.camera_names}
@@ -421,6 +425,37 @@ class HDF5Loader(DataLoaderBase):
                 if obs_vec is None or act_vec is None:
                     log.warn(f"     ⚠️  Empty obs/action vector at step {i}")
                     return False
+
+                # Extract gripper/tool state if available; prefer key containing 'gripper'
+                tools_dict = point.get('tools') or {}
+                gripper_val = None
+                if isinstance(tools_dict, dict) and len(tools_dict) > 0:
+                    tkeys = sorted(tools_dict.keys())
+                    # prefer keys that mention gripper
+                    prefer = [k for k in tkeys if 'gripper' in k.lower()]
+                    sel_key = prefer[0] if prefer else tkeys[0]
+                    tpos = tools_dict.get(sel_key, {}).get('position', None)
+                    if tpos is not None:
+                        gv = np.asarray(tpos, dtype=np.float32).reshape(-1)
+                        # Use the first element if it is a vector; most grippers are scalar
+                        gripper_val = gv if gv.size == 1 else np.array([gv[0]], dtype=np.float32)
+
+                # For EE obs/action modes, ensure EE part first and append gripper state last (absolute)
+                def _maybe_append_gripper(vec, mode: str):
+                    # mode: 'obs' or 'act'
+                    if gripper_val is None:
+                        return vec
+                    # expected base length for EE pose (position+quat): 7
+                    ee_mode = (mode == 'obs' and obs_type_str in ('end_effector_pose', 'delta_ee_pose')) or d(mode == 'act' and act_type_str in ('end_effector_pose', 'end_effector_pose_delta'))
+                    if not ee_mode:
+                        return vec
+                    # Append only if it looks like gripper is not already included
+                    if vec.shape[0] == 7:
+                        return np.concatenate([vec, gripper_val], axis=0)
+                    return vec
+
+                obs_vec = _maybe_append_gripper(obs_vec, 'obs')
+                act_vec = _maybe_append_gripper(act_vec, 'act')
 
                 state_array.append(obs_vec)
                 action_array.append(act_vec)
@@ -480,6 +515,16 @@ class HDF5Loader(DataLoaderBase):
                 image_arrays[cam_name] = np.stack(images, axis=0)
             else:
                 image_arrays[cam_name] = np.empty((0, image_size[0], image_size[1], 3), dtype=np.uint8)
+
+        # Dimension validation: For EE modes, actions must include gripper state (8 dims total)
+        ee_obs_mode = obs_type_str in ("end_effector_pose", "delta_ee_pose")
+        ee_act_mode = act_type_str in ("end_effector_pose", "end_effector_pose_delta")
+        if ee_obs_mode or ee_act_mode:
+            if action_array.shape[1] != 8:
+                raise ValueError(
+                    f"EE mode requires 8-dim actions (7D EE + 1D gripper), got actions{action_array.shape}. "
+                    f"Ensure tool/gripper state is present and appended during conversion."
+                )
 
         log.info(f"     📊 Arrays: state{state_array.shape}, actions{action_array.shape}")
 
