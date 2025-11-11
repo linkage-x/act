@@ -385,8 +385,6 @@ class HDF5Loader(DataLoaderBase):
             log.error("     ❌ Empty data_points passed to conversion")
             return False
 
-        primary_obs_key = None
-        primary_act_key = None
         strict_camera = bool(self._config.get('strict_camera', True))
 
         state_array = []
@@ -403,20 +401,26 @@ class HDF5Loader(DataLoaderBase):
                     log.warn(f"     ⚠️  Missing observations/actions at step {i}")
                     return False
 
-                if primary_obs_key is None:
-                    primary_obs_key = next(iter(obs_dict.keys()))
-                if primary_act_key is None:
-                    primary_act_key = next(iter(act_dict.keys()))
+                # Flatten observation/actions by concatenating vectors from all keys in sorted order
+                def _flatten_vecs(dct):
+                    keys = sorted(dct.keys())
+                    parts = []
+                    for k in keys:
+                        v = dct.get(k)
+                        if v is None:
+                            continue
+                        v = np.asarray(v, dtype=np.float32).reshape(-1)
+                        parts.append(v)
+                    if not parts:
+                        return None
+                    return np.concatenate(parts, axis=0)
 
-                obs_vec = obs_dict.get(primary_obs_key)
-                act_vec = act_dict.get(primary_act_key)
+                obs_vec = _flatten_vecs(obs_dict)
+                act_vec = _flatten_vecs(act_dict)
 
                 if obs_vec is None or act_vec is None:
-                    log.warn(f"     ⚠️  Missing data for primary key at step {i}")
+                    log.warn(f"     ⚠️  Empty obs/action vector at step {i}")
                     return False
-
-                obs_vec = np.asarray(obs_vec, dtype=np.float32)
-                act_vec = np.asarray(act_vec, dtype=np.float32)
 
                 state_array.append(obs_vec)
                 action_array.append(act_vec)
