@@ -446,7 +446,10 @@ class HDF5Loader(DataLoaderBase):
                     if gripper_val is None:
                         return vec
                     # expected base length for EE pose (position+quat): 7
-                    ee_mode = (mode == 'obs' and obs_type_str in ('end_effector_pose', 'delta_ee_pose')) or d(mode == 'act' and act_type_str in ('end_effector_pose', 'end_effector_pose_delta'))
+                    ee_mode = (
+                        (mode == 'obs' and obs_type_str in ('end_effector_pose', 'delta_ee_pose')) or
+                        (mode == 'act' and act_type_str in ('end_effector_pose', 'end_effector_pose_delta'))
+                    )
                     if not ee_mode:
                         return vec
                     # Append only if it looks like gripper is not already included
