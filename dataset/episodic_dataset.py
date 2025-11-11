@@ -28,7 +28,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
     def __init__(self, episode_ids: List[int], episode_id_to_dir: Dict[int, Tuple[str, int]],
                  camera_names: List[str], norm_stats: Dict, episode_len: int,
-                 augmentation_config=None, control_mode='joint', ee_delta: bool = False):
+                 augmentation_config=None, control_mode='joint'):
         """
         Initialize Episodic Dataset
 
@@ -49,7 +49,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.episode_len = episode_len
         self.is_sim = None
         self.control_mode = control_mode
-        self.ee_delta = bool(ee_delta)
 
         # Initialize data augmentation
         if augmentation_config is not None:
@@ -120,18 +119,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
             else:
                 start_ts = np.random.choice(episode_len)
 
-            # Load observations at start_ts
-            if self.control_mode == 'ee_pose' and '/observations/ee_pose' in root:
-                cur_pose = root['/observations/ee_pose'][start_ts]
-                if self.ee_delta:
-                    # delta prev: s[0]=0, s[t]=pose[t]-pose[t-1]
-                    prev_idx = max(0, start_ts - 1)
-                    prev_pose = root['/observations/ee_pose'][prev_idx]
-                    state = cur_pose - prev_pose
-                else:
-                    state = cur_pose
-            else:
-                state = root['/observations/state'][start_ts]
+            # Load observations at start_ts (canonical key written at conversion time)
+            state = root['/observations/state'][start_ts]
 
             # Load images
             image_dict = dict()
@@ -141,27 +130,16 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
             # Load actions after and including start_ts
             if is_sim:
-                if self.control_mode == 'ee_pose' and '/ee_action' in root:
-                    action = root['/ee_action'][start_ts:]
-                else:
-                    action = root['/action'][start_ts:]
+                action = root['/action'][start_ts:]
                 action_len = episode_len - start_ts
             else:
                 # Hack for real robot: start from one timestep earlier for alignment
-                if self.control_mode == 'ee_pose' and '/ee_action' in root:
-                    action = root['/ee_action'][max(0, start_ts - 1):]
-                else:
-                    action = root['/action'][max(0, start_ts - 1):]
+                action = root['/action'][max(0, start_ts - 1):]
                 action_len = episode_len - max(0, start_ts - 1)
 
         self.is_sim = is_sim
 
-        # If in EE control and delta flag set, convert to delta (prev) by default: a[t]=raw[t]-raw[t-1], a[0]=0
-        if self.control_mode == 'ee_pose' and self.ee_delta and action_len > 0:
-            diffs = np.zeros_like(action)
-            if action_len > 1:
-                diffs[1:action_len] = action[1:action_len] - action[: action_len - 1]
-            action = diffs
+        # No additional transformation here: HDF5 already contains the final representation
 
         # Pad actions to target length
         target_len = self.episode_len

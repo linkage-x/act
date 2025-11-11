@@ -177,29 +177,9 @@ class HDF5Loader(DataLoaderBase):
             dataset_path = os.path.join(dir_path, f'episode_{local_episode_id}.hdf5')
             try:
                 with h5py.File(dataset_path, 'r') as root:
-                    # State stats: prefer EE pose for ee modes; delta if requested
-                    if self.control_mode == 'ee_pose' and '/observations/ee_pose' in root:
-                        sraw = root['/observations/ee_pose'][()]
-                        if self.ee_delta and sraw.shape[0] > 1:
-                            sdiff = np.zeros_like(sraw)
-                            sdiff[1:] = sraw[1:] - sraw[:-1]
-                            state = sdiff
-                        else:
-                            state = sraw
-                    else:
-                        state = root['/observations/state'][()]
-
-                    # Action stats: prefer EE action; delta if requested
-                    if self.control_mode == 'ee_pose' and '/ee_action' in root:
-                        araw = root['/ee_action'][()]
-                        if self.ee_delta and araw.shape[0] > 1:
-                            adiff = np.zeros_like(araw)
-                            adiff[1:] = araw[1:] - araw[:-1]
-                            action = adiff
-                        else:
-                            action = araw
-                    else:
-                        action = root['/action'][()]
+                    # Stats are computed on the canonical keys written at conversion time
+                    state = root['/observations/state'][()]
+                    action = root['/action'][()]
 
                 all_state_data.append(torch.from_numpy(state))
                 all_action_data.append(torch.from_numpy(action))
@@ -255,14 +235,14 @@ class HDF5Loader(DataLoaderBase):
         # Compute normalization stats
         norm_stats = self.compute_normalization_stats(available_episode_ids, episode_id_to_dir)
 
-        # Create datasets
+        # Create datasets (no transformation here; datasets consume HDF5 as-is)
         train_dataset = EpisodicDataset(
             train_episode_ids, episode_id_to_dir, self.camera_names,
-            norm_stats, self.episode_len, self.augmentation_config, self.control_mode, ee_delta=self.ee_delta
+            norm_stats, self.episode_len, self.augmentation_config, self.control_mode
         )
         val_dataset = EpisodicDataset(
             val_episode_ids, episode_id_to_dir, self.camera_names,
-            norm_stats, self.episode_len, None, self.control_mode, ee_delta=self.ee_delta  # No augmentation for validation
+            norm_stats, self.episode_len, None, self.control_mode  # No augmentation for validation
         )
 
         # Create dataloaders
