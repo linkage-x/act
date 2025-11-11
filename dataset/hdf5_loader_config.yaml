@@ -1,10 +1,10 @@
 # HDF5 Loader Configuration for ACT
 
 # Task directory (for convert mode: source directory with raw episodes)
-task_dir: "/data/fr3/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep"
+task_dir: "/data/fr3/1105_insert_pinboard_3dmouse_41eps"
 
 # Output directory (for convert mode: where to save HDF5 files)
-output_dir: "/data/fr3_hdf5/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep_hdf5"
+output_dir: "/data/fr3_hdf5/1105_insert_pinboard_3dmouse_41eps_hdf5"
 
 # Action type: "joint_position" or "end_effector_pose"
 action_type: "end_effector_pose_delta"

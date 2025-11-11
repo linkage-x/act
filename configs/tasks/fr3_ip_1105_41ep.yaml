@@ -4,16 +4,16 @@
 extends: base/fr3
 
 task:
-  name: fr3_ip_1030_56ep
+  name: fr3_ip_1105_41ep
 
 data:
   dataset_dirs:
-    - /data/fr3_hdf5/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep_hdf5
-  episode_len: 300  # 经过预处理优化的长度
-  num_episodes: 56
+    - /data/fr3_hdf5/1105_insert_pinboard_3dmouse_41eps_hdf5
+  episode_len: 300
+  num_episodes: 41
 
 training:
-  ckpt_dir: ckpts/fr3_ip_1030_56ep_dee2dee
+  ckpt_dir: ckpts/fr3_ip_1105_41ep_dee2dee
   batch_size: 64
   num_epochs: 8000
   lr: 5e-5
