@@ -9,7 +9,7 @@ task:
 data:
   dataset_dirs:
     - /data/fr3_hdf5/1030_left_fr3_insert_pinboard_fixed_3dmouse_56ep_hdf5
-  episode_len: 800  # 经过预处理优化的长度
+  episode_len: 300  # 经过预处理优化的长度
   num_episodes: 56
 
 training:
