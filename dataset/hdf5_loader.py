@@ -116,47 +116,47 @@ class HDF5Loader(DataLoaderBase):
                 episode_id_to_dir[global_episode_id] = (dir_path, local_episode_id)
 
         # Validate episodes
-        available_episode_ids = []
-        for episode_idx, file_path in enumerate(episode_files):
-            try:
-                with h5py.File(file_path, 'r') as root:
-                    _ = root.attrs.get('sim')
-                    action_shape = root['/action'].shape
-                    episode_length = action_shape[0]
+        # available_episode_ids = []
+        # for episode_idx, file_path in enumerate(episode_files):
+        #     try:
+                # with h5py.File(file_path, 'r') as root:
+                    # _ = root.attrs.get('sim')
+                    # action_shape = root['/action'].shape
+                    # episode_length = action_shape[0]
 
-                    # Test multiple random positions
-                    test_indices = [0, episode_length // 2, episode_length - 1]
-                    if episode_length > 10:
-                        test_indices.extend([episode_length // 4, 3 * episode_length // 4])
+                    # # Test multiple random positions
+                    # test_indices = [0, episode_length // 2, episode_length - 1]
+                    # if episode_length > 10:
+                    #     test_indices.extend([episode_length // 4, 3 * episode_length // 4])
 
-                    for idx in test_indices:
-                        if idx < episode_length:
-                            _ = root['/observations/state'][idx]
-                            if '/observations/images' in root:
-                                cam_names = list(root['/observations/images'].keys())
-                                for cam_name in cam_names:
-                                    _ = root[f'/observations/images/{cam_name}'][idx]
-                            _ = root['/action'][idx]
+                    # for idx in test_indices:
+                    #     if idx < episode_length:
+                    #         _ = root['/observations/state'][idx]
+                    #         if '/observations/images' in root:
+                    #             cam_names = list(root['/observations/images'].keys())
+                    #             for cam_name in cam_names:
+                    #                 _ = root[f'/observations/images/{cam_name}'][idx]
+                    #         _ = root['/action'][idx]
 
-                available_episode_ids.append(episode_idx)
-            except Exception as e:
-                log.error(f"Skipping {file_path} due to error: {e}")
+        #         available_episode_ids.append(episode_idx)
+        #     except Exception as e:
+        #         log.error(f"Skipping {file_path} due to error: {e}")
 
-        actual_num_episodes = len(available_episode_ids)
-        log.info(f"📊 Auto-detected {actual_num_episodes} available episodes from {len(dataset_dirs)} directories")
+        # actual_num_episodes = len(available_episode_ids)
+        # log.info(f"📊 Auto-detected {actual_num_episodes} available episodes from {len(dataset_dirs)} directories")
 
-        # Limit episodes if num_episodes is specified
-        if self.num_episodes is not None and self.num_episodes < actual_num_episodes:
-            available_episode_ids = available_episode_ids[:self.num_episodes]
-            actual_num_episodes = len(available_episode_ids)
-            log.info(f"📊 Limited to first {actual_num_episodes} episodes as requested")
+        # # Limit episodes if num_episodes is specified
+        # if self.num_episodes is not None and self.num_episodes < actual_num_episodes:
+        #     available_episode_ids = available_episode_ids[:self.num_episodes]
+        #     actual_num_episodes = len(available_episode_ids)
+        #     log.info(f"📊 Limited to first {actual_num_episodes} episodes as requested")
 
-        if actual_num_episodes == 0:
-            raise ValueError(f"No valid episodes found in {dataset_dirs}")
-        if actual_num_episodes < 2:
-            raise ValueError(f"Need at least 2 valid episodes for train/val split, but only found {actual_num_episodes}")
+        # if actual_num_episodes == 0:
+        #     raise ValueError(f"No valid episodes found in {dataset_dirs}")
+        # if actual_num_episodes < 2:
+        #     raise ValueError(f"Need at least 2 valid episodes for train/val split, but only found {actual_num_episodes}")
 
-        return available_episode_ids, episode_id_to_dir
+        return self.num_episodes, episode_id_to_dir
 
     def compute_normalization_stats(self, episode_ids: List[int], episode_id_to_dir: Dict[int, Tuple[str, int]]) -> Dict[str, Any]:
         """
@@ -427,38 +427,38 @@ class HDF5Loader(DataLoaderBase):
                     return False
 
                 # Extract gripper/tool state if available; prefer key containing 'gripper'
-                tools_dict = point.get('tools') or {}
-                gripper_val = None
-                if isinstance(tools_dict, dict) and len(tools_dict) > 0:
-                    tkeys = sorted(tools_dict.keys())
-                    # prefer keys that mention gripper
-                    prefer = [k for k in tkeys if 'gripper' in k.lower()]
-                    sel_key = prefer[0] if prefer else tkeys[0]
-                    tpos = tools_dict.get(sel_key, {}).get('position', None)
-                    if tpos is not None:
-                        gv = np.asarray(tpos, dtype=np.float32).reshape(-1)
-                        # Use the first element if it is a vector; most grippers are scalar
-                        gripper_val = gv if gv.size == 1 else np.array([gv[0]], dtype=np.float32)
+                # tools_dict = point.get('tools') or {}
+                # gripper_val = None
+                # if isinstance(tools_dict, dict) and len(tools_dict) > 0:
+                #     tkeys = sorted(tools_dict.keys())
+                #     # prefer keys that mention gripper
+                #     prefer = [k for k in tkeys if 'gripper' in k.lower()]
+                #     sel_key = prefer[0] if prefer else tkeys[0]
+                #     tpos = tools_dict.get(sel_key, {}).get('position', None)
+                #     if tpos is not None:
+                #         gv = np.asarray(tpos, dtype=np.float32).reshape(-1)
+                #         # Use the first element if it is a vector; most grippers are scalar
+                #         gripper_val = gv if gv.size == 1 else np.array([gv[0]], dtype=np.float32)
 
                 # For EE obs/action modes, ensure EE part first and append gripper state last (absolute)
-                def _maybe_append_gripper(vec, mode: str):
-                    # mode: 'obs' or 'act'
-                    if gripper_val is None:
-                        return vec
-                    # expected base length for EE pose (position+quat): 7
-                    ee_mode = (
-                        (mode == 'obs' and obs_type_str in ('end_effector_pose', 'delta_ee_pose')) or
-                        (mode == 'act' and act_type_str in ('end_effector_pose', 'end_effector_pose_delta'))
-                    )
-                    if not ee_mode:
-                        return vec
-                    # Append only if it looks like gripper is not already included
-                    if vec.shape[0] == 7:
-                        return np.concatenate([vec, gripper_val], axis=0)
-                    return vec
+                # def _maybe_append_gripper(vec, mode: str):
+                #     # mode: 'obs' or 'act'
+                #     if gripper_val is None:
+                #         return vec
+                #     # expected base length for EE pose (position+quat): 7
+                #     ee_mode = (
+                #         (mode == 'obs' and obs_type_str in ('end_effector_pose', 'delta_ee_pose')) or
+                #         (mode == 'act' and act_type_str in ('end_effector_pose', 'end_effector_pose_delta'))
+                #     )
+                #     if not ee_mode:
+                #         return vec
+                #     # Append only if it looks like gripper is not already included
+                #     # if vec.shape[0] == 7:
+                #     #     return np.concatenate([vec, gripper_val], axis=0)
+                #     return vec
 
-                obs_vec = _maybe_append_gripper(obs_vec, 'obs')
-                act_vec = _maybe_append_gripper(act_vec, 'act')
+                # obs_vec = _maybe_append_gripper(obs_vec, 'obs')
+                # act_vec = _maybe_append_gripper(act_vec, 'act')
 
                 state_array.append(obs_vec)
                 action_array.append(act_vec)

@@ -27,7 +27,7 @@ Action_Type_Mapping_Dict = {
     "joint_position": ActionType.JOINT_POSITION,
     "joint_position_delta": ActionType.JOINT_POSITION_DELTA,
     "end_effector_pose": ActionType.END_EFFECTOR_POSE,
-    "end_effector_pose_delta": ActionType.END_EFFECTOR_POSE_DELTA,
+    "delta_ee_pose": ActionType.END_EFFECTOR_POSE_DELTA,
     "command_joint_position": ActionType.COMMAND_JOINT_POSITION,
     "command_end_effector_pose": ActionType.COMMAND_END_EFFECTOR_POSE
 }
