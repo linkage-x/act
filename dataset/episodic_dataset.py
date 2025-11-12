@@ -28,7 +28,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
 
     def __init__(self, episode_ids: List[int], episode_id_to_dir: Dict[int, Tuple[str, int]],
                  camera_names: List[str], norm_stats: Dict, episode_len: int,
-                 augmentation_config=None, control_mode='joint'):
+                 augmentation_config=None):
         """
         Initialize Episodic Dataset
 
@@ -39,7 +39,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
             norm_stats: Normalization statistics
             episode_len: Maximum episode length (for padding)
             augmentation_config: Data augmentation configuration (training only)
-            control_mode: 'joint' for joint position control, 'ee_pose' for EE pose control
         """
         super(EpisodicDataset).__init__()
         self.episode_ids = episode_ids
@@ -48,7 +47,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.norm_stats = norm_stats
         self.episode_len = episode_len
         self.is_sim = None
-        self.control_mode = control_mode
 
         # Initialize data augmentation
         if augmentation_config is not None:

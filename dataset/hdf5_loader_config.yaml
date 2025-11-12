@@ -7,10 +7,10 @@ task_dir: "/data/fr3/1105_insert_pinboard_3dmouse_41eps"
 output_dir: "/data/fr3_hdf5/1105_insert_pinboard_3dmouse_41eps_q2q"
 
 # Action type: "joint_position" or "end_effector_pose"
-action_type: "end_effector_pose_delta"
+# action_type: "end_effector_pose_delta"
 
 # Observation type: "joint_position_only" or "end_effector_pose"
-obs_type: "delta_ee_pose"
+# obs_type: "delta_ee_pose"
 
 # Skip steps for downsampling (1 = no skip, 2 = every 2nd frame, etc.)
 skip_steps_nums: 3
@@ -32,7 +32,7 @@ is_sim: false
 # Episode length filtering (episodes outside this range will be skipped during conversion)
 # Set to null to disable filtering
 min_episode_len: 200
-max_episode_len: 4000
+max_episode_len: 1000
 
 # Batch size for training
 batch_size_train: 32

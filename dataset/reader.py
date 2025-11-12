@@ -8,48 +8,28 @@ os.environ["RUST_LOG"] = "error"
 import glog as log
 
 class ObservationType(enum.Enum):
-    JOINT_POSITION_ONLY = "jonit_position"
-    END_EFFECTOR_POSE = "ee_pose"
-    DELTA_END_EFFECTOR_POSE = "delta_ee_pose"
-    JOINT_POSITION_END_EFFECTOR = "jonit_position_ee_pose"
-    MASK = "mask"
+    JointPosition = "q"
+    DeltaJointPosition = "dq"
+    EEPose = "ee"
+    DeltaEEPose = "dee"
+    JP_EEPose = "q_ee"
+    Mask = "mask"
+    FT = "ft"
 
 class ActionType(enum.Enum):
-    JOINT_POSITION = 0
-    JOINT_POSITION_DELTA = 1
-    END_EFFECTOR_POSE = 2
-    END_EFFECTOR_POSE_DELTA = 3
-    JOINT_TORQUE = 4
-    COMMAND_JOINT_POSITION = 5
-    COMMAND_END_EFFECTOR_POSE = 6
-
-Action_Type_Mapping_Dict = {
-    "joint_position": ActionType.JOINT_POSITION,
-    "joint_position_delta": ActionType.JOINT_POSITION_DELTA,
-    "end_effector_pose": ActionType.END_EFFECTOR_POSE,
-    "delta_ee_pose": ActionType.END_EFFECTOR_POSE_DELTA,
-    "command_joint_position": ActionType.COMMAND_JOINT_POSITION,
-    "command_end_effector_pose": ActionType.COMMAND_END_EFFECTOR_POSE
-}
-
-# String-to-enum mapping for observation types (tolerate historic typos)
-Observation_Type_Mapping_Dict = {
-    # canonical keys
-    "joint_position_only": ObservationType.JOINT_POSITION_ONLY,
-    "end_effector_pose": ObservationType.END_EFFECTOR_POSE,
-    "delta_ee_pose": ObservationType.DELTA_END_EFFECTOR_POSE,
-    "joint_position_ee_pose": ObservationType.JOINT_POSITION_END_EFFECTOR,
-    "mask": ObservationType.MASK,
-    # backward-compatibility (typos present in earlier code)
-    "jonit_position": ObservationType.JOINT_POSITION_ONLY,
-    "jonit_position_ee_pose": ObservationType.JOINT_POSITION_END_EFFECTOR,
-}
+    JointPosition = "q"
+    DeltaJointPosition = "dq"
+    EEPose = "ee"
+    DeltaEEPose = "dee"
+    # TODO @hph
+    # COMMAND_JOINT_POSITION = "cmdq"
+    # COMMAND_END_EFFECTOR_POSE = "cmdee"
 
 class RerunEpisodeReader:
     def __init__(self, task_dir = ".", json_file="data.json", 
-                 action_type: ActionType = ActionType.JOINT_POSITION,
+                 action_type: ActionType = ActionType.JointPosition,
                  action_prediction_step = 2, action_ori_type = "euler", 
-                 observation_type = ObservationType.JOINT_POSITION_ONLY,
+                 observation_type = ObservationType.JointPosition,
                  rotation_transform = None):
         self.task_dir = task_dir
         self.json_file = json_file
@@ -97,7 +77,7 @@ class RerunEpisodeReader:
             # Append the observation state data in the item_data list
             cur_obs = {}
             joint_states = item_data.get("joint_states", {})
-            if self._obs_type == ObservationType.JOINT_POSITION_ONLY or self._obs_type == ObservationType.JOINT_POSITION_END_EFFECTOR:
+            if self._obs_type in (ObservationType.JointPosition, ObservationType.JP_EEPose):
                 if joint_states is None or len(joint_states) == 0:
                     raise ValueError(f'Do not get the {i}th joint state from {self.task_dir} {episode_dir} for {self._obs_type}')
             ee_states = item_data.get('ee_states', {})
@@ -110,25 +90,25 @@ class RerunEpisodeReader:
                     else: init_ee_poses[key] = None
             # @TODO: used for latter head tracker
             head_pose = ee_states.pop('head', None)
-            if self._obs_type == ObservationType.JOINT_POSITION_END_EFFECTOR or self._obs_type == ObservationType.END_EFFECTOR_POSE:
+            if self._obs_type in (ObservationType.JP_EEPose, ObservationType.EEPose):
                 if ee_states is None or len(ee_states) == 0:
                     raise ValueError(f'Do not get the {i}th ee state pose from {self.task_dir} {episode_dir} for {self._obs_type}')
             
-            if self._obs_type == ObservationType.JOINT_POSITION_ONLY or self._obs_type == ObservationType.JOINT_POSITION_END_EFFECTOR:
+            if self._obs_type in (ObservationType.JointPosition, ObservationType.JP_EEPose):
                 for key in joint_states.keys():
                     cur_obs[key] = np.array(joint_states[key]["position"])
-                    if self._obs_type == ObservationType.JOINT_POSITION_END_EFFECTOR:
+                    if self._obs_type == ObservationType.JP_EEPose:
                         ee_pose = self.apply_rotation_offset(ee_states[key]["pose"], key,
                                                             init_data=init_ee_poses[key])
                         cur_obs[key] = np.hstack((cur_obs[key], ee_pose))
-            elif self._obs_type == ObservationType.END_EFFECTOR_POSE or self._obs_type == ObservationType.DELTA_END_EFFECTOR_POSE:
+            elif self._obs_type in (ObservationType.EEPose, ObservationType.DeltaEEPose):
                 next_id = i + 1
                 if next_id >= len_json_file: continue
                 next_ee_states = json_data[next_id].get("ee_states", {})
                 for key in ee_states.keys():
                     ee_pose = self.apply_rotation_offset(ee_states[key]["pose"], key,
                                                         init_data=init_ee_poses[key])
-                    if self._obs_type == ObservationType.END_EFFECTOR_POSE:
+                    if self._obs_type == ObservationType.EEPose:
                         cur_obs[key] = np.array(ee_pose)
                     else:
                         next_pose = next_ee_states[key]["pose"]
@@ -136,7 +116,7 @@ class RerunEpisodeReader:
                         next_pose = self.apply_rotation_offset(next_pose, key,
                                                 init_data=init_ee_poses[key])
                         cur_obs[key] = self.get_pose_diff(next_pose, ee_pose)
-            elif self._obs_type == ObservationType.MASK:
+            elif self._obs_type == ObservationType.Mask:
                 for key in ee_states.keys():
                     cur_obs[key] = np.zeros(7)
             
@@ -144,12 +124,12 @@ class RerunEpisodeReader:
             cur_actions = {}
             action_state_id = i+self._action_prediction_step
             if action_state_id >= len_json_file: continue
-            if self.action_type == ActionType.JOINT_POSITION:
+            if self.action_type == ActionType.JointPosition:
                 joint_states = item_data.get("joint_states", {})
                 cur_actions = self._get_absolute_action(joint_states, 
                         action_state=json_data[action_state_id]["joint_states"],
                                                     attribute_name="position")
-            elif self.action_type == ActionType.END_EFFECTOR_POSE:
+            elif self.action_type == ActionType.EEPose:
                 init_data = None if len(init_ee_poses) == 0 else init_ee_poses
                 cur_actions = self._get_absolute_action(item_data.get("ee_states", {}),
                                     action_state=json_data[action_state_id]["ee_states"],
@@ -163,11 +143,11 @@ class RerunEpisodeReader:
                     cur_actions = modified_action
                 elif self._action_ori_type != "quaternion":
                     raise ValueError(f'The action orientation type {self._action_ori_type} is not supported for reading episode data')
-            elif self.action_type == ActionType.JOINT_POSITION_DELTA:
+            elif self.action_type == ActionType.DeltaJointPosition:
                 joint_states = item_data.get("joint_states", {})
                 next_state_data = json_data[action_state_id].get("joint_states", {})
                 cur_actions = self._get_delta_action(joint_states, next_state_data, "position")
-            elif self.action_type == ActionType.END_EFFECTOR_POSE_DELTA:
+            elif self.action_type == ActionType.DeltaEEPose:
                 ee_states = item_data.get("ee_states", {})
                 next_state_data = json_data[action_state_id].get("ee_states", {})
                 for key, pose in ee_states.items():
@@ -191,7 +171,7 @@ class RerunEpisodeReader:
             tool_states = item_data.get("tools", {})
             for key, tool_state in tool_states.items():
                 cur_actions[key] = np.hstack((cur_actions[key], tool_state["position"]))
-                if self._obs_type == ObservationType.MASK:
+                if self._obs_type == ObservationType.Mask:
                     cur_obs[key] = np.hstack((cur_obs[key], [0]))
                 else:
                     cur_obs[key] = np.hstack((cur_obs[key], tool_state["position"]))
@@ -355,6 +335,6 @@ if __name__ == "__main__":
     data_folder = "dataset/data/test_now"
     cur_path = os.path.dirname(os.path.abspath(__file__))
     task_dir = os.path.join(cur_path, '../..', data_folder)
-    episode_reader = RerunEpisodeReader(task_dir=task_dir, action_type=ActionType.JOINT_POSITION_DELTA)
+    episode_reader = RerunEpisodeReader(task_dir=task_dir, action_type=ActionType.DeltaJointPosition)
     data = episode_reader.return_episode_data(2, 1)
-    print(f'data: {data}')    
+    print(f'data: {data}')

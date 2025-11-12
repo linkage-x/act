@@ -4,8 +4,8 @@ from dataset.reader import RerunEpisodeReader, ActionType, ObservationType
 import glog as log
 
 class DataLoaderBase(abc.ABC, metaclass=abc.ABCMeta):
-    def __init__(self, config, task_dir:str, json_file_name:str = "data.json", action_type:ActionType = ActionType.JOINT_POSITION,
-                 observation_type = ObservationType.JOINT_POSITION_ONLY):
+    def __init__(self, config, task_dir:str, json_file_name:str = "data.json", action_type:ActionType = ActionType.JointPosition,
+                 observation_type = ObservationType.JointPosition):
         self._config = config
         self._action_prediction_step = config.get("action_prediction_step", 2)
         self._action_type = action_type

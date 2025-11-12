@@ -16,7 +16,7 @@ import glog as log
 
 # Import base class
 from dataset.data_loader_base import DataLoaderBase
-from dataset.reader import ActionType, ObservationType, Action_Type_Mapping_Dict, Observation_Type_Mapping_Dict
+from dataset.reader import ActionType, ObservationType
 
 # Import dataset
 from dataset.episodic_dataset import EpisodicDataset
@@ -28,8 +28,8 @@ class HDF5Loader(DataLoaderBase):
     """
 
     def __init__(self, config: Dict[str, Any], dataset_dir: str,
-                 action_type: ActionType = ActionType.JOINT_POSITION,
-                 observation_type: ObservationType = ObservationType.JOINT_POSITION_ONLY,
+                 action_type: ActionType = ActionType.JointPosition,
+                 observation_type: ObservationType = ObservationType.JointPosition,
                  skip_steps_nums: int = 2):
         """
         Initialize HDF5 Loader
@@ -48,22 +48,8 @@ class HDF5Loader(DataLoaderBase):
         self.config = config
         self.skip_steps_nums = skip_steps_nums
 
-        # Determine control mode from action_type and observation_type
-        # Support ee_pose if either action or observation uses EE pose
-        if (action_type in (ActionType.END_EFFECTOR_POSE, ActionType.END_EFFECTOR_POSE_DELTA) or
-            observation_type in (ObservationType.END_EFFECTOR_POSE, ObservationType.DELTA_END_EFFECTOR_POSE, ObservationType.JOINT_POSITION_END_EFFECTOR)):
-            self.control_mode = 'ee_pose'
-        else:
-            self.control_mode = 'joint'
-
-        # Whether to use delta EE mode (dee2dee)
-        self.ee_delta = (
-            action_type == ActionType.END_EFFECTOR_POSE_DELTA or
-            observation_type == ObservationType.DELTA_END_EFFECTOR_POSE
-        )
-
         # Data loading parameters
-        self.num_episodes = config.get('num_episodes', None)
+        # self.num_episodes = config.get('num_episodes', None)
         self.camera_names = config.get('camera_names', ['ee_cam', 'third_person_cam'])
         self.batch_size_train = config.get('batch_size_train', 32)
         self.batch_size_val = config.get('batch_size_val', 32)
@@ -80,7 +66,6 @@ class HDF5Loader(DataLoaderBase):
 
         log.info(f"📂 HDF5Loader initialized:")
         log.info(f"   Dataset dir: {dataset_dir}")
-        log.info(f"   Control mode: {self.control_mode}")
         log.info(f"   Skip steps: {self.skip_steps_nums}")
         log.info(f"   Camera names: {self.camera_names}")
 
@@ -156,7 +141,16 @@ class HDF5Loader(DataLoaderBase):
         # if actual_num_episodes < 2:
         #     raise ValueError(f"Need at least 2 valid episodes for train/val split, but only found {actual_num_episodes}")
 
-        return self.num_episodes, episode_id_to_dir
+        # Build available episode ids from discovered files
+        available_episode_ids = list(range(len(episode_files)))
+        # Limit if num_episodes specified
+        # if self.num_episodes is not None:
+        #     try:
+        #         n = int(self.num_episodes)
+        #         available_episode_ids = available_episode_ids[:max(0, n)]
+        #     except Exception:
+        #         pass
+        return available_episode_ids, episode_id_to_dir
 
     def compute_normalization_stats(self, episode_ids: List[int], episode_id_to_dir: Dict[int, Tuple[str, int]]) -> Dict[str, Any]:
         """
@@ -191,7 +185,6 @@ class HDF5Loader(DataLoaderBase):
         all_state_data = torch.cat(all_state_data, dim=0)
         all_action_data = torch.cat(all_action_data, dim=0)
 
-        # Normalize action data (joint or EE-delta depending on control_mode)
         action_mean = all_action_data.mean(dim=0, keepdim=True)
         action_std = all_action_data.std(dim=0, keepdim=True)
         action_std = torch.clip(action_std, 1e-2, np.inf)
@@ -238,11 +231,11 @@ class HDF5Loader(DataLoaderBase):
         # Create datasets (no transformation here; datasets consume HDF5 as-is)
         train_dataset = EpisodicDataset(
             train_episode_ids, episode_id_to_dir, self.camera_names,
-            norm_stats, self.episode_len, self.augmentation_config, self.control_mode
+            norm_stats, self.episode_len, self.augmentation_config
         )
         val_dataset = EpisodicDataset(
             val_episode_ids, episode_id_to_dir, self.camera_names,
-            norm_stats, self.episode_len, None, self.control_mode  # No augmentation for validation
+            norm_stats, self.episode_len, None  # No augmentation for validation
         )
 
         # Create dataloaders
@@ -594,15 +587,44 @@ if __name__ == '__main__':
     image_size_list = config.get("image_size", [480, 640])
     image_size = tuple(image_size_list)
 
-    # Convert action type and observation type strings to enums
-    action_type = Action_Type_Mapping_Dict.get(action_type_str, ActionType.JOINT_POSITION)
-    obs_type = Observation_Type_Mapping_Dict.get(obs_type_str, ObservationType.JOINT_POSITION_ONLY)
+    # Infer io-mode (obs->act) from output_dir suffix like *_<obs>2<act>
+    # Supported tokens: q, dq, ee, dee
+    def parse_io_mode_from_output_dir(path: str):
+        import re
+        m = re.search(r"(dee|ee|dq|q)2(dee|ee|dq|q)(?![A-Za-z0-9])", path)
+        if not m:
+            return None, None
+        return m.group(1), m.group(2)
+
+    obs_tok, act_tok = parse_io_mode_from_output_dir(output_dir or "")
+
+    # Map token to ObservationType / ActionType
+    def map_obs(tok: str) -> ObservationType:
+        return {
+            'q': ObservationType.JointPosition,
+            'dq': ObservationType.DeltaJointPosition,
+            'ee': ObservationType.EEPose,
+            'dee': ObservationType.DeltaEEPose,
+        }.get(tok, ObservationType.JointPosition)
+
+    def map_act(tok: str) -> ActionType:
+        return {
+            'q': ActionType.JointPosition,
+            'dq': ActionType.DeltaJointPosition,
+            'ee': ActionType.EEPose,
+            'dee': ActionType.DeltaEEPose,
+        }.get(tok, ActionType.JointPosition)
+
+    if obs_tok and act_tok:
+        obs_type = map_obs(obs_tok)
+        action_type = map_act(act_tok)
+        print(f"   🔎 Inferred io-mode from output_dir: {obs_tok}2{act_tok} -> obs={obs_type}, act={action_type}")
 
     print(f"\n📋 Configuration:")
     print(f"   Task dir (source): {task_dir}")
     print(f"   Output dir: {output_dir}")
-    print(f"   Action type: {action_type_str}")
-    print(f"   Obs type: {obs_type_str}")
+    print(f"   Action type: {action_type}")
+    print(f"   Obs type: {obs_type}")
     print(f"   Skip steps: {skip_steps_nums}")
     print(f"   Image size: {image_size}\n")
 
